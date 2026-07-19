@@ -1,56 +1,41 @@
 {
   "main": {
-    "id": "8a14d8436e1a4807",
+    "id": "d136b71ab007c1a8",
     "type": "split",
     "children": [
       {
-        "id": "a3fbb0f83cb5af5a",
+        "id": "cd93ca00b06ce9ac",
         "type": "tabs",
         "children": [
           {
-            "id": "e2f82bba18ef5501",
+            "id": "ccf638e08a5f57b2",
             "type": "leaf",
             "state": {
               "type": "markdown",
               "state": {
-                "file": "Context 1.md",
+                "file": "01-Foundations/Cognitive-Flexibility-Theory.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "Context 1"
-            }
-          },
-          {
-            "id": "c1d74293c39413bf",
-            "type": "leaf",
-            "state": {
-              "type": "markdown",
-              "state": {
-                "file": "Prompt 1.md",
-                "mode": "source",
-                "source": false
-              },
-              "icon": "lucide-file",
-              "title": "Prompt 1"
+              "title": "Cognitive-Flexibility-Theory"
             }
           }
-        ],
-        "currentTab": 1
+        ]
       }
     ],
     "direction": "vertical"
   },
   "left": {
-    "id": "5201dbcdbfba1305",
+    "id": "e70a20f20d79fc29",
     "type": "split",
     "children": [
       {
-        "id": "b6cc7bfda4b545f7",
+        "id": "b59cc45c473cd374",
         "type": "tabs",
         "children": [
           {
-            "id": "28aee1485e57fe07",
+            "id": "24f98ff4582d8eb1",
             "type": "leaf",
             "state": {
               "type": "file-explorer",
@@ -63,7 +48,7 @@
             }
           },
           {
-            "id": "4d75e30380b6fb65",
+            "id": "36edccfe44e8043f",
             "type": "leaf",
             "state": {
               "type": "search",
@@ -80,7 +65,7 @@
             }
           },
           {
-            "id": "fce70f34e524ab4c",
+            "id": "f07068ebc05f29a3",
             "type": "leaf",
             "state": {
               "type": "bookmarks",
@@ -96,20 +81,20 @@
     "width": 300
   },
   "right": {
-    "id": "7b25432150d77913",
+    "id": "800d5098441f299d",
     "type": "split",
     "children": [
       {
-        "id": "b4000aa68c53624d",
+        "id": "6807a6b2e58280c0",
         "type": "tabs",
         "children": [
           {
-            "id": "716cce3ea8f85053",
+            "id": "fa2fe34c3a5cbaa9",
             "type": "leaf",
             "state": {
               "type": "backlink",
               "state": {
-                "file": "Prompt 1.md",
+                "file": "01-Foundations/Cognitive-Flexibility-Theory.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -119,25 +104,25 @@
                 "unlinkedCollapsed": true
               },
               "icon": "links-coming-in",
-              "title": "Backlinks for Prompt 1"
+              "title": "Backlinks for Cognitive-Flexibility-Theory"
             }
           },
           {
-            "id": "46a86aaa972ed5f5",
+            "id": "3e49b2857fb9d5d1",
             "type": "leaf",
             "state": {
               "type": "outgoing-link",
               "state": {
-                "file": "Prompt 1.md",
+                "file": "01-Foundations/Cognitive-Flexibility-Theory.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               },
               "icon": "links-going-out",
-              "title": "Outgoing links from Prompt 1"
+              "title": "Outgoing links from Cognitive-Flexibility-Theory"
             }
           },
           {
-            "id": "4ff442b4b0e94c77",
+            "id": "e203baa6dc36a512",
             "type": "leaf",
             "state": {
               "type": "tag",
@@ -152,7 +137,7 @@
             }
           },
           {
-            "id": "70bd1438ca2db28f",
+            "id": "80b62025c03e61df",
             "type": "leaf",
             "state": {
               "type": "all-properties",
@@ -166,18 +151,18 @@
             }
           },
           {
-            "id": "84e570724fa3694e",
+            "id": "f826edfacf83ea18",
             "type": "leaf",
             "state": {
               "type": "outline",
               "state": {
-                "file": "Prompt 1.md",
+                "file": "01-Foundations/Cognitive-Flexibility-Theory.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "Outline of Prompt 1"
+              "title": "Outline of Cognitive-Flexibility-Theory"
             }
           }
         ]
@@ -198,23 +183,6 @@
       "bases:Create new base": false
     }
   },
-  "active": "c1d74293c39413bf",
-  "lastOpenFiles": [
-    "Context 1.md",
-    "Prompt 1.md",
-    "Untitled.md",
-    "Qwen Answer.md",
-    "LMArena agent Answer.md",
-    "Z.ai GLM5.2 Answer.md",
-    "Question 2.md",
-    "Question 3.md",
-    "Untitled 3.md",
-    "Untitled 2.md",
-    "Untitled 8.md",
-    "Untitled 7.md",
-    "Untitled 6.md",
-    "Untitled 5.md",
-    "Untitled 4.md",
-    "Welcome.md"
-  ]
+  "active": "ccf638e08a5f57b2",
+  "lastOpenFiles": []
 }

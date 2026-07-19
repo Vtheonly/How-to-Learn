@@ -1,3 +1,5 @@
+https://github.com/Vtheonly/How-to-Learn
+
 The revised prompt below has been restructured to focus strictly on the **cognitive mechanisms, behavioral strategies, and information-processing heuristics** used by high-performing technical learners to consume, filter, and retain massive volumes of dense technical literature without experiencing cognitive overload. 
 
 This version minimizes general curriculum listings and highlights the core phenomenon: the process of high-velocity, high-volume technical acquisition.

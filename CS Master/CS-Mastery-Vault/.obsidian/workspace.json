@@ -1,56 +1,41 @@
 {
   "main": {
-    "id": "8a14d8436e1a4807",
+    "id": "00f8729ca16dcdb0",
     "type": "split",
     "children": [
       {
-        "id": "a3fbb0f83cb5af5a",
+        "id": "d803dfffeb43fc0b",
         "type": "tabs",
         "children": [
           {
-            "id": "e2f82bba18ef5501",
+            "id": "275d6db9b78612c3",
             "type": "leaf",
             "state": {
               "type": "markdown",
               "state": {
-                "file": "Context 1.md",
+                "file": "08_References/References Index.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "Context 1"
-            }
-          },
-          {
-            "id": "c1d74293c39413bf",
-            "type": "leaf",
-            "state": {
-              "type": "markdown",
-              "state": {
-                "file": "Prompt 1.md",
-                "mode": "source",
-                "source": false
-              },
-              "icon": "lucide-file",
-              "title": "Prompt 1"
+              "title": "References Index"
             }
           }
-        ],
-        "currentTab": 1
+        ]
       }
     ],
     "direction": "vertical"
   },
   "left": {
-    "id": "5201dbcdbfba1305",
+    "id": "51b59f21db29b92d",
     "type": "split",
     "children": [
       {
-        "id": "b6cc7bfda4b545f7",
+        "id": "5c7dbe597fef619e",
         "type": "tabs",
         "children": [
           {
-            "id": "28aee1485e57fe07",
+            "id": "77ada5440b1a6baa",
             "type": "leaf",
             "state": {
               "type": "file-explorer",
@@ -63,12 +48,12 @@
             }
           },
           {
-            "id": "4d75e30380b6fb65",
+            "id": "1e70b5a4a5086684",
             "type": "leaf",
             "state": {
               "type": "search",
               "state": {
-                "query": "",
+                "query": "criss",
                 "matchingCase": false,
                 "explainSearch": false,
                 "collapseAll": false,
@@ -80,7 +65,7 @@
             }
           },
           {
-            "id": "fce70f34e524ab4c",
+            "id": "6807bd275af2e0f4",
             "type": "leaf",
             "state": {
               "type": "bookmarks",
@@ -89,27 +74,28 @@
               "title": "Bookmarks"
             }
           }
-        ]
+        ],
+        "currentTab": 1
       }
     ],
     "direction": "horizontal",
     "width": 300
   },
   "right": {
-    "id": "7b25432150d77913",
+    "id": "48ce1828470807f1",
     "type": "split",
     "children": [
       {
-        "id": "b4000aa68c53624d",
+        "id": "077f34b3ee7d5902",
         "type": "tabs",
         "children": [
           {
-            "id": "716cce3ea8f85053",
+            "id": "ac11b234a15f4b04",
             "type": "leaf",
             "state": {
               "type": "backlink",
               "state": {
-                "file": "Prompt 1.md",
+                "file": "01_Theory/T2 — Cognitive Load Theory.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -119,25 +105,25 @@
                 "unlinkedCollapsed": true
               },
               "icon": "links-coming-in",
-              "title": "Backlinks for Prompt 1"
+              "title": "Backlinks for T2 — Cognitive Load Theory"
             }
           },
           {
-            "id": "46a86aaa972ed5f5",
+            "id": "b655095e69bebaf1",
             "type": "leaf",
             "state": {
               "type": "outgoing-link",
               "state": {
-                "file": "Prompt 1.md",
+                "file": "01_Theory/T2 — Cognitive Load Theory.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               },
               "icon": "links-going-out",
-              "title": "Outgoing links from Prompt 1"
+              "title": "Outgoing links from T2 — Cognitive Load Theory"
             }
           },
           {
-            "id": "4ff442b4b0e94c77",
+            "id": "923fd9f8359f5bcd",
             "type": "leaf",
             "state": {
               "type": "tag",
@@ -152,7 +138,7 @@
             }
           },
           {
-            "id": "70bd1438ca2db28f",
+            "id": "a645081af1b5d1e5",
             "type": "leaf",
             "state": {
               "type": "all-properties",
@@ -166,18 +152,18 @@
             }
           },
           {
-            "id": "84e570724fa3694e",
+            "id": "9f3ee76369ce47fb",
             "type": "leaf",
             "state": {
               "type": "outline",
               "state": {
-                "file": "Prompt 1.md",
+                "file": "01_Theory/T2 — Cognitive Load Theory.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "Outline of Prompt 1"
+              "title": "Outline of T2 — Cognitive Load Theory"
             }
           }
         ]
@@ -198,23 +184,9 @@
       "bases:Create new base": false
     }
   },
-  "active": "c1d74293c39413bf",
+  "active": "275d6db9b78612c3",
   "lastOpenFiles": [
-    "Context 1.md",
-    "Prompt 1.md",
-    "Untitled.md",
-    "Qwen Answer.md",
-    "LMArena agent Answer.md",
-    "Z.ai GLM5.2 Answer.md",
-    "Question 2.md",
-    "Question 3.md",
-    "Untitled 3.md",
-    "Untitled 2.md",
-    "Untitled 8.md",
-    "Untitled 7.md",
-    "Untitled 6.md",
-    "Untitled 5.md",
-    "Untitled 4.md",
-    "Welcome.md"
+    "01_Theory/T2 — Cognitive Load Theory.md",
+    "01_Theory/T1 — Schema Transfer.md"
   ]
 }
