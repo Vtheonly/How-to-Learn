@@ -11,10 +11,14 @@
             "id": "00379fe5cb7b1ff0",
             "type": "leaf",
             "state": {
-              "type": "graph",
-              "state": {},
-              "icon": "lucide-git-fork",
-              "title": "Graph view"
+              "type": "markdown",
+              "state": {
+                "file": "Merged-Vault/04 Protocols/P1 - How to Read a Research Paper.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "P1 - How to Read a Research Paper"
             }
           }
         ]
@@ -74,7 +78,7 @@
       }
     ],
     "direction": "horizontal",
-    "width": 300
+    "width": 487.5
   },
   "right": {
     "id": "5313b2c7533d5329",
@@ -178,6 +182,11 @@
   },
   "active": "00379fe5cb7b1ff0",
   "lastOpenFiles": [
+    "Merged-Vault/README.md",
+    "Merged-Vault/00 Index/Start Here.md",
+    "Merged-Vault/00 Index/Untitled.md",
+    "Merged-Vault/00 Index/Vault Map.md",
+    "Merged-Vault/00 Index/Vault Map.canvas",
     "Merged-Vault/26 Daily Notes/2026 07 20 - Sample Day.md",
     "Merged-Vault/25 Glossary/Glossary.md",
     "Merged-Vault/25 Glossary/Glossary Index.md",
@@ -200,11 +209,6 @@
     "Merged-Vault/23 Pitfalls and Pseudoscience/Biohacking Myths.md",
     "Merged-Vault/22 PKM Setup and Tools/Spaced Repetition Software.md",
     "Merged-Vault/22 PKM Setup and Tools/Plugin Recommendations.md",
-    "Merged-Vault/22 PKM Setup and Tools/P4 - Plugin Stack.md",
-    "Merged-Vault/22 PKM Setup and Tools/P3 - MOC Pattern.md",
-    "Merged-Vault/22 PKM Setup and Tools/P2 - Link Grammar.md",
-    "Merged-Vault/22 PKM Setup and Tools/P1 - Tag System.md",
-    "Merged-Vault/00 Index/Vault Map.canvas",
     "Merged-Vault/26 Daily Notes",
     "Merged-Vault/25 Glossary",
     "Merged-Vault/24 Templates",
