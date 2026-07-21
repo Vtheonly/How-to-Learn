@@ -46,6 +46,7 @@ import {
 } from "../core/enums";
 import { NotFoundError, ValidationError } from "../infrastructure/error/app-error";
 import { logger } from "../infrastructure/logger/logger";
+import { validateQuoteBlockDropdowns } from "../shared/quote-dropdown-values";
 
 /**
  * A soft validation warning. Excel's "Nb 02" rule on the Devis sheet
@@ -119,8 +120,19 @@ export function qualifiesForEarlyPaymentBonus(
  * in the school-fee column (index 5). This avoids false negatives
  * when the operator splits the confirmation payment across multiple
  * children in the same block.
+ *
+ * ── Iteration 4 (build-blocker fix) ──
+ * The signature accepts the *partial* line-item shape
+ * (`Omit<QuoteLineItem, "id"|"lineTotal">`) in addition to full
+ * `QuoteLineItem[]`. The Nb 02 rule only inspects `amounts`, so the
+ * id and lineTotal fields are irrelevant. This removes the type
+ * mismatch that blocked compilation when `validateInput` was called
+ * from `QuoteService.update()` with merged items that did not yet
+ * carry `id`/`lineTotal`.
  */
-export function isQuoteConfirmed(items: QuoteLineItem[]): boolean {
+export function isQuoteConfirmed(
+  items: Array<Pick<QuoteLineItem, "amounts"> & Partial<QuoteLineItem>>,
+): boolean {
   if (!Array.isArray(items) || items.length === 0) return false;
   return items.some((it) => {
     const fi = Number(it.amounts?.[4]) || 0;
@@ -375,8 +387,28 @@ export class QuoteService {
    * save is NOT blocked — Excel's rule is informational, and an
    * operator may legitimately create a draft quote before the
    * confirmation payment is recorded.
+   *
+   * ── Iteration 4 (build-blocker fix) ──
+   * The signature accepts a *partial* `CreateQuoteBlockInput` so it
+   * can be called from `update()` with a patch object where `name`
+   * is optional. Previously the strict `CreateQuoteBlockInput`
+   * signature (with `name` required) caused a TS2345 error in
+   * `update()` because the merged patch did not always carry `name`.
+   * The `name` field is not used by the Nb 02 check, so accepting a
+   * partial shape is safe.
+   *
+   * ── Issue 5.5 (iteration 4): dropdown validation ──
+   * The Excel Devis sheet has five data-validation dropdowns on each
+   * line item row: CLASSE (col D), FI (col E), FRAISSCOLAIRE (col F),
+   * SERVICE (col G), and transport (col H). In the source workbook
+   * all five named ranges are broken, so the dropdowns are empty.
+   * The software previously had NO validation at all — any string
+   * was silently accepted. We now surface advisory warnings for
+   * values that don't match the canonical lists in
+   * `shared/quote-dropdown-values.ts`. The save is NOT blocked,
+   * mirroring Excel's permissive behaviour.
    */
-  validateInput(input: CreateQuoteBlockInput): QuoteValidationWarning[] {
+  validateInput(input: Partial<CreateQuoteBlockInput>): QuoteValidationWarning[] {
     const warnings: QuoteValidationWarning[] = [];
     const items = input.items ?? [];
     if (items.length > 0 && !isQuoteConfirmed(items)) {
@@ -388,6 +420,16 @@ export class QuoteService {
           '"Toute inscription doit etre confirmée par un versement ' +
           '(frais d\'inscription + 1er tranche)." The save proceeds — ' +
           'record the confirmation payment when it is received.',
+      });
+    }
+
+    // ── Issue 5.5: validate dropdown fields against canonical lists ──
+    const dropdownWarnings = validateQuoteBlockDropdowns(items);
+    for (const w of dropdownWarnings) {
+      warnings.push({
+        field: w.field,
+        value: w.value,
+        message: w.message,
       });
     }
     return warnings;

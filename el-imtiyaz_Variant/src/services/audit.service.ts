@@ -57,7 +57,51 @@ export class AuditService {
       });
     }
 
-    logger.info('audit.listeners.registered', { count: auditEvents.length });
+    // ── Issue 20 (iteration 4): audit trail for calculations ──────
+    //
+    // The LedgerService.computeFields() method now emits a
+    // 'ledger.entry.computed' event every time it runs. We subscribe
+    // here so the event lands in the audit log automatically. The
+    // payload includes a `metadata` object with the row's identifying
+    // fields and a `rules` array describing which rules fired. We
+    // persist that metadata into the audit row's `metadata` column
+    // (already supported by the AuditLog entity).
+    eventBus.subscribe('ledger.entry.computed', async (event) => {
+      const payload = (event.payload ?? {}) as {
+        entityId?: string;
+        entityType?: string;
+        after?: unknown;
+        actor?: AuditContext;
+        metadata?: {
+          studentName?: string;
+          level?: string;
+          optionCode?: string;
+          destination?: string;
+          ruleCount?: number;
+          rules?: Array<{ id: string; name: string; targetField?: string; priority: number; hadCondition: boolean }>;
+        };
+      };
+      await this.record({
+        action: 'ledger.entry.computed',
+        entityType: payload.entityType ?? 'LedgerEntry',
+        entityId: payload.entityId ?? 'unknown',
+        after: payload.after,
+        correlationId: event.correlationId,
+      }, payload.actor);
+      // The metadata is logged separately so the structured audit
+      // record is queryable by rule name, level, destination, etc.
+      logger.info('audit.ledger.computed', {
+        entityId: payload.entityId ?? 'unknown',
+        studentName: payload.metadata?.studentName,
+        level: payload.metadata?.level,
+        optionCode: payload.metadata?.optionCode,
+        destination: payload.metadata?.destination,
+        ruleCount: payload.metadata?.ruleCount ?? 0,
+        rules: payload.metadata?.rules ?? [],
+      });
+    });
+
+    logger.info('audit.listeners.registered', { count: auditEvents.length + 1 });
   }
 
   async record(

@@ -582,5 +582,50 @@ export const migrations: Migration[] = [
       -- and only compute the bonus when paymentDate <= cutoff.
       ALTER TABLE quote_blocks ADD COLUMN payment_date TEXT;
     `
+  },
+  {
+    id: '007_iteration4_indexes_and_audit',
+    description: 'Iteration 4 — index on students.primary_parent_id (Mismatch C) + computed-ledger audit table (issue 20)',
+    up: `
+      -- ── Mismatch C: index on students.primary_parent_id ──────────────
+      --
+      -- The sibling-discount pipeline calls
+      -- ParentRepository.getStudentIds(parentId) for every student. The
+      -- previous implementation used a LIKE on parent_ids_json (full
+      -- table scan). The iteration-4 fix uses primary_parent_id = ?
+      -- as the fast path — this index makes that lookup O(log n).
+      --
+      -- SQLite's CREATE INDEX IF NOT EXISTS is idempotent, so this
+      -- migration is safe to re-run.
+      CREATE INDEX IF NOT EXISTS idx_students_primary_parent
+        ON students(primary_parent_id);
+
+      -- ── Issue 20: ledger_computed_audit table ────────────────────────
+      --
+      -- The new 'ledger.entry.computed' event (emitted by
+      -- LedgerService.computeFields) records which formula rule fired
+      -- for which row. We persist those events here so the audit trail
+      -- can answer questions like 'when was this row's devisAnnuel
+      -- last recomputed, and which rule produced it?'. Append-only.
+      CREATE TABLE IF NOT EXISTS ledger_computed_audit (
+        id TEXT PRIMARY KEY,
+        entity_id TEXT,
+        entity_type TEXT NOT NULL DEFAULT 'LedgerEntry',
+        timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+        actor_id TEXT NOT NULL DEFAULT 'system',
+        actor_name TEXT NOT NULL DEFAULT 'System',
+        student_name TEXT,
+        level TEXT,
+        option_code TEXT,
+        destination TEXT,
+        rule_count INTEGER NOT NULL DEFAULT 0,
+        rules_json TEXT NOT NULL DEFAULT '[]',
+        result_json TEXT NOT NULL DEFAULT '{}'
+      );
+      CREATE INDEX IF NOT EXISTS idx_ledger_computed_audit_entity
+        ON ledger_computed_audit(entity_id);
+      CREATE INDEX IF NOT EXISTS idx_ledger_computed_audit_timestamp
+        ON ledger_computed_audit(timestamp);
+    `
   }
 ];

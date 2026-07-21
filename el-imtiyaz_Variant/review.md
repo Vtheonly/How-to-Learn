@@ -1069,6 +1069,14 @@ By treating `septemberBalance` as a user-provided input and throwing a validatio
 If a student's computed unpaid balance for September is actually 15,000 DZD, the application will throw a validation error and block the operator from saving the row. This halts operations because a valid calculated outstanding debt is flagged as an input error.
 
 ### Mismatch C: The Broken Sibling Discount Pipeline
+
+> ✅ **RESOLVED in iteration 4** — see
+> [`../all_that_is_solved_so_far.md`](../all_that_is_solved_so_far.md)
+> (Fix #31, Mismatch C). The `LIKE` query is now a fallback only;
+> the fast path uses `primary_parent_id = ?` (indexed). The legacy
+> fallback is kept for imported spreadsheet rows whose
+> `primary_parent_id` is null. Verified by 3 unit tests.
+
 In `DiscountPipeline.resolveEligibility()` (`src/pipelines/discount-pipeline.ts`), sibling relationships are evaluated by scanning the `students` table's JSON column using a SQL `LIKE` query:
 
 ```sql

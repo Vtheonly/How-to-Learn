@@ -1,5 +1,33 @@
 # Complete Gap Analysis: Software vs. Excel Workbook
 
+> ## ✅ Iteration 4 — 10 more issues resolved (2026-07-22)
+>
+> Building on iterations 1–3, ten additional issues have been
+> **fully resolved and verified**. The resolved issues are:
+>
+> | Issue | Title | Severity | Fix # |
+> |-------|-------|----------|-------|
+> | (build blocker) | TypeScript TS2345 errors in `quote.service.ts` blocking `npm start` | FATAL | #23 |
+> | (build blocker) | Missing `DataGrid` component (referenced by 12 UI pages, never created) | FATAL | #24 |
+> | 4.3 | Transport tranches hardcoded at 30k/15k/10k (need tier-based breakdown) | HIGH | #25 |
+> | 6.3 | No validation for December/March receivable columns (only September) | MEDIUM | #26 |
+> | 8.1 | Off-by-one reference in S94 (`=110000-J95`) — undetected during ingestion | LOW | #27 |
+> | 10.4 / 13 | `condition_expr` field on `FormulaRule` was dead code (never read) | MEDIUM | #28 |
+> | 19 | `recomputeAll()` loads every entry into memory (10k row scalability) | MEDIUM | #29 |
+> | 20 | No audit trail for calculations (which rule fired for which row) | LOW | #30 |
+> | Mismatch C | Sibling discount pipeline using `LIKE '%"id"%'` on JSON column | MEDIUM | #31 |
+> | 5.5 | Quote block dropdowns (CLASSE/FI/FRAISSCOLAIRE/SERVICE/transport) had no validation | MEDIUM | #32 |
+>
+> **Cumulative across all four iterations**: 32 issues fully resolved,
+> verified by **153 tests** (35 iteration-1 + 35 iteration-2 +
+> 35 iteration-3 + 48 iteration-4), all passing. The two build
+> blockers (Fix #23, Fix #24) were not in the original review
+> document but prevented the user from running `npm start` at all —
+> they are now fixed so the application boots cleanly.
+>
+> Full details, code references, test links, and screenshots are in
+> [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md).
+
 > ## ✅ Iteration 3 — 7 more issues resolved (2026-07-21)
 >
 > Building on iterations 1 and 2, seven additional issues have been
@@ -281,6 +309,22 @@ The software's `allocatePaymentToLedger` fills slots in order (fi → v2 → alt
 
 ### 4.3 Transport tranche amounts are NOT fixed at 30k/15k/10k
 
+> ✅ **RESOLVED in iteration 4** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #25, Issue 4.3).
+> New `TRANSPORT_INSTALLMENTS_BY_TIER` table in
+> `src/shared/pricing.ts` exposes the documented (T1, T2, T3)
+> breakdown for each of the 4 transport tiers:
+>   - NEARBY (35k total)       → 20k / 10k / 5k
+>   - INTERMEDIATE (43k total) → 25k / 12k / 6k
+>   - MEDIUM (52k total)       → 30k / 12k / 10k
+>   - FAR (55k total)          → 30k / 15k / 10k
+> `resolveTransportInstallments(town)` returns the breakdown for a
+> destination. `LedgerService.validateInput()` surfaces a soft warning
+> when typed transport tranches don't match the documented tier
+> breakdown (the save is NOT blocked — the operator may have
+> negotiated a custom plan). Verified by 5 unit tests.
+
+### ~~4.3 Transport tranche amounts are NOT fixed at 30k/15k/10k~~
+
 **Software assumes:** t1=30,000, t2=15,000, t3=10,000 (from `DEFAULT_FEE_SCHEDULE`).
 
 **Excel reality:** These vary. Some students have t1=20,000, t2=13,000, t3=10,000. Others have t1=30,000, t2=12,000, t3=10,000. The amounts depend on the transport destination and the family's payment arrangement.
@@ -353,6 +397,21 @@ Excel's note says the 5% applies **only if paid in full before June 30**. The so
 
 ### 5.5 Quote block dropdowns reference non-existent named ranges
 
+> ✅ **RESOLVED in iteration 4** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #32, Issue 5.5).
+> New `src/shared/quote-dropdown-values.ts` module exposes the
+> canonical CLASSE / FI / FRAISSCOLAIRE / SERVICE / transport
+> dropdown lists reconstructed from the Obsidian vault.
+> `validateQuoteLineItemDropdowns()` and `validateQuoteBlockDropdowns()`
+> return advisory warnings for values not in the canonical lists.
+> `QuoteService.validateInput()` calls the validator so the warnings
+> surface alongside the existing Nb 02 / 8.7 checks. The save is NOT
+> blocked — mirroring Excel's permissive behaviour with broken
+> named ranges. A `classToLevel()` helper maps specific class codes
+> (CE1, 3AAM, 1AS, etc.) to their parent level for the form UI.
+> Verified by 9 unit tests.
+
+### ~~5.5 Quote block dropdowns reference non-existent named ranges~~
+
 Excel's Devis sheet has 5 data-validation dropdowns (`CLASSE`, `FI`, `FRAISSCOLAIRE`, `SERVICE`, `transport`) that are **all broken** (named ranges don't exist). The software doesn't implement any dropdown validation for quote line items.
 
 ### 5.6 Quote block "Nb 02" confirmation rule is not enforced
@@ -409,6 +468,15 @@ Excel's validation is on `AG1:AG1032` (CREANCES SEPTEMBRE), but this column has 
 
 ### 6.3 No validation exists for other receivable columns
 
+> ✅ **RESOLVED in iteration 4** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #26, Issue 6.3).
+> `LedgerService.validateInput()` now applies the same soft-warning
+> advisory to `decemberBalance` (column AI) and `marchBalance`
+> (column AK) that it already applied to `septemberBalance` (AG).
+> The threshold matches Excel's AG-column rule (10,000 DZD) and is
+> informational only — the save always proceeds. Verified by 4 unit tests.
+
+### ~~6.3 No validation exists for other receivable columns~~
+
 Excel only validates AG (September). Columns AI (December receivable) and AK (March receivable) have no validation. The software doesn't distinguish between them.
 
 ---
@@ -460,6 +528,20 @@ Excel's BON sheet references a `'PAR PARENT'` sheet that was a parent-level summ
 ## Category 8: Edge Cases & Data Integrity
 
 ### 8.1 Off-by-one reference in S94
+
+> ✅ **RESOLVED in iteration 4** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #27, Issue 8.1).
+> `ExcelIngestionService.importLedger()` now calls a new
+> `detectOffByOneReferences(row, sourceRow)` helper for every row.
+> The helper scans payment columns R–Y for formulas that reference
+> `J{row±1}` (the documented S94 pattern: `=110000-J95` on row 94).
+> Detected anomalies are returned in the new
+> `ImportLedgerResult.offByOneWarnings` array and logged via
+> `logger.warn`. The imported value is preserved as-is — the operator
+> decides whether the spreadsheet's value is correct or needs manual
+> correction. Verified by 3 unit tests (the helper is narrow on
+> purpose to avoid false positives on legitimate cross-row formulas).
+
+### ~~8.1 Off-by-one reference in S94~~
 
 **Excel:** `S94: =110000-J95` (references J95, should be J94)
 
@@ -592,18 +674,21 @@ The software creates a field `ePlant: number` for this column. The Excel header 
 | ✅ 2.3 | ~~GRAND TOTAL formula invented (doesn't exist in Excel)~~ — **RESOLVED iter 1** |  Medium | Phantom feature |
 | ✅ 4.1 | ~~Arbitrary payment caps (25k, 71.5k, etc.)~~ — **RESOLVED iter 1** |  Critical | Payment |
 | 4.2 | Sequential auto-allocation vs. manual placement (also addressed by iter 1 fix #5) |  Critical | Payment |
-| 4.3 | Transport tranches fixed at 30k/15k/10k |  High | Payment |
+| ✅ 4.3 | ~~Transport tranches fixed at 30k/15k/10k~~ — **RESOLVED iter 4** |  High | Payment |
 | 5.1 | "8 amount columns" model is wrong |  High | Quote |
 | ✅ 5.2 | ~~"advances" concept doesn't exist in Excel~~ — **RESOLVED iter 3** |  Medium | Quote |
 | ✅ 5.3 | ~~5% treated as tax, actually informational note~~ — **RESOLVED iter 3** |  High | Quote |
 | ✅ 5.4 | ~~5% is conditional on payment date~~ — **RESOLVED iter 3** |  Medium | Quote |
+| ✅ 5.5 | ~~Quote block dropdowns had no validation~~ — **RESOLVED iter 4** |  Medium | Quote |
 | ✅ 5.6 | ~~Confirmation rule not enforced~~ — **RESOLVED iter 3** |  Medium | Quote |
 | ✅ 6.1 | ~~Hard validation vs. Excel's soft validation~~ — **RESOLVED iter 1** |  High | Validation |
 | ✅ 6.2 | ~~Validates an empty column~~ — **RESOLVED iter 1** |  Medium | Validation |
+| ✅ 6.3 | ~~No validation for Dec/Mar receivable columns~~ — **RESOLVED iter 4** |  Medium | Validation |
 | 7.1 | No customer statement (BON equivalent) |  High | Missing feature |
 | 7.2 | No family-level grouping |  High | Missing feature |
 | 7.3 | Comment-based audit trail → structured DB (paradigm shift) |  Medium | Workflow |
 | 7.4 | No conditional formatting equivalent |  Low | Visual |
+| ✅ 8.1 | ~~Off-by-one S94 reference undetected during ingestion~~ — **RESOLVED iter 4** |  Low | Edge case |
 | ✅ 8.2 | ~~Overpayments blocked (Excel allows)~~ — **RESOLVED iter 2** |  High | Edge case |
 | ✅ 8.3 | ~~Zero-amount / fully-discounted students (negative devis)~~ — **RESOLVED iter 3** |  Medium | Edge case |
 | ✅ 8.4 | ~~TRNSP option adds transport even when Excel didn't~~ — **RESOLVED iter 2** |  High | Edge case |
@@ -613,17 +698,20 @@ The software creates a field `ePlant: number` for this column. The Excel header 
 | ✅ 8.8 | ~~Sheet name "BON " has trailing space~~ — **RESOLVED iter 1** |  Low | Import |
 | ✅ 8.9 | ~~Imports 600+ empty rows beyond filter range~~ — **RESOLVED iter 1** |  Low | Import |
 
-> **Cumulative summary (iterations 1 + 2 + 3)**: 22 issues fully
-> resolved (1.1, 1.2, 1.3, 1.4, 2.3, 4.1, 5.2, 5.3, 5.4, 5.6, 6.1, 6.2,
-> 8.2, 8.3, 8.4, 8.5, 8.6, 8.7, 8.8, 8.9, plus the FATAL §1 inter-rule
-> data flow and the issues 11/16 ingestion-preservation pair, and the
-> issues 12/14 circular-dep pair) and 1 partially resolved (9.4 —
-> soft-warning part done; validation-rules-registry still open). Issue
-> 1.6 (single formula for all 390 students) is largely addressed by
-> iteration 2 fixes 1.1–1.4 + §17, though the deeper architectural ask
-> (per-row formula storage) remains open. See
-> [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) for
-> full details, code references, test links, and screenshots.
+> **Cumulative summary (iterations 1 + 2 + 3 + 4)**: 32 issues fully
+> resolved (1.1, 1.2, 1.3, 1.4, 2.3, 4.1, 4.3, 5.2, 5.3, 5.4, 5.5,
+> 5.6, 6.1, 6.2, 6.3, 8.1, 8.2, 8.3, 8.4, 8.5, 8.6, 8.7, 8.8, 8.9,
+> plus the FATAL §1 inter-rule data flow and the issues 11/16
+> ingestion-preservation pair, the issues 12/14 circular-dep pair,
+> the issue 10.4 condition_expr dead-code, the issue 19 recomputeAll
+> scalability, the issue 20 audit-trail gap, and the Mismatch C
+> sibling-discount LIKE-query performance bug) and 1 partially
+> resolved (9.4 — soft-warning part done; validation-rules-registry
+> still open). Issue 1.6 (single formula for all 390 students) is
+> largely addressed by iteration 2 fixes 1.1–1.4 + §17, though the
+> deeper architectural ask (per-row formula storage) remains open.
+> See [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md)
+> for full details, code references, test links, and screenshots.
 
 ---
 
@@ -1086,6 +1174,19 @@ The `LedgerEntry` entity has no field for storing a per-row formula expression. 
 
 ### 10.4 The `condition_expr` field is dead
 
+> ✅ **RESOLVED in iteration 4** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #28, Issue 10.4/13).
+> `LedgerService.computeFields()` now evaluates each rule's
+> `condition` field against `ctx.fields` and skips rules whose
+> condition returns false. The condition mini-language is
+> intentionally minimal (string equality, numeric comparison, AND /
+> OR / NOT, IS NULL / IS NOT NULL) — see
+> `src/shared/rule-condition.ts`. Parse errors are logged but do NOT
+> block the calculation pipeline. Verified by 7 unit tests including
+> an integration test that creates a PRIM-only rule and confirms it
+> fires for PRIM students but is skipped for LYC students.
+
+### ~~10.4 The `condition_expr` field is dead~~
+
 The `FormulaRule` entity has:
 
 ```typescript
@@ -1270,14 +1371,14 @@ FamilyService.getStatement(tutorName) → {
 | 10 | **Missing: family grouping** |  HIGH | No equivalent of BON sheet's VLOOKUP-based family statement. |
 | 11 | **Missing: pricing lookup** |  HIGH | No level→fee or destination→transport mapping service. **(Largely addressed by iter 2 fixes #9, #10, #11 — `shared/pricing.ts` now provides both lookups.)** |
 | 12 | **Missing: formula composition** |  HIGH | No service that builds per-row formula from row attributes. **(Partly addressed by iter 2 fix #15 — formulas can now branch on level/optionCode/destination.)** |
-| 13 | **condition_expr dead code** |  MEDIUM | Field exists on entity, never read by any service. |
+| ✅ 13 | ~~**condition_expr dead code**~~ | ~~MEDIUM~~ | ~~Field exists on entity, never read by any service.~~ **RESOLVED iter 4 — see [all_that_is_solved_so_far.md](./all_that_is_solved_so_far.md) Fix #28.** |
 | ✅ 14 | ~~**Circular dependency hack**~~ | ~~MEDIUM~~ | ~~`services.feeSchedule["ledger"] = services.ledger` bypasses DI.~~ **RESOLVED iter 3 — see [all_that_is_solved_so_far.md](./all_that_is_solved_so_far.md) Fix #21.** |
 | ✅ 15 | ~~**Soft vs hard validation**~~ | ~~MEDIUM~~ | ~~Excel's septemberBalance validation is soft. Software throws exception.~~ **RESOLVED iter 1 — see [all_that_is_solved_so_far.md](./all_that_is_solved_so_far.md) Fix #4.** |
 | ✅ 16 | ~~**Ingestion skips computed values**~~ | ~~MEDIUM~~ | ~~Import reads inputs, skips computed columns, then recomputes incorrectly.~~ **RESOLVED iter 3 — see [all_that_is_solved_so_far.md](./all_that_is_solved_so_far.md) Fix #20.** |
 | ✅ 17 | ~~**Context missing metadata**~~ | ~~MEDIUM~~ | ~~optionCode, level, classCode, destination not in formula context.~~ **RESOLVED iter 2 — see [all_that_is_solved_so_far.md](./all_that_is_solved_so_far.md) Fix #15.** |
 | 18 | **No ranges in context** |  MEDIUM | VLOOKUP support exists in engine but ranges never populated. |
-| 19 | **Scalability** |  MEDIUM | recomputeAll() loads all 10,000 entries into memory, evaluates sequentially. |
-| 20 | **No audit trail for calculations** |  LOW | No record of which formula was used for which row, or what components composed it. |
+| ✅ 19 | ~~**Scalability**~~ | ~~MEDIUM~~ | ~~recomputeAll() loads all 10,000 entries into memory, evaluates sequentially.~~ **RESOLVED iter 4 — see [all_that_is_solved_so_far.md](./all_that_is_solved_so_far.md) Fix #29.** |
+| ✅ 20 | ~~**No audit trail for calculations**~~ | ~~LOW~~ | ~~No record of which formula was used for which row, or what components composed it.~~ **RESOLVED iter 4 — see [all_that_is_solved_so_far.md](./all_that_is_solved_so_far.md) Fix #30.** |
 
 The engine cannot produce the same results as the Excel workbook in its current architecture. Fixing the fatal context-flow bug (item 1) would make TOTAL CREANCE compute correctly for the fallback path, but the structural flaws (items 2–5) mean the DEVIS ANNUEL itself would still be wrong for every student whose level, transport, or discount configuration differs from the single hardcoded formula.
 
@@ -1402,6 +1503,19 @@ By treating `septemberBalance` as a user-provided input and throwing a validatio
 If a student's computed unpaid balance for September is actually 15,000 DZD, the application will throw a validation error and block the operator from saving the row. This halts operations because a valid calculated outstanding debt is flagged as an input error.
 
 ### Mismatch C: The Broken Sibling Discount Pipeline
+
+> ✅ **RESOLVED in iteration 4** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #31, Mismatch C).
+> `ParentRepository.getStudentIds(parentId)` now uses
+> `primary_parent_id = ?` as the fast path (indexed via the new
+> `idx_students_primary_parent` created by migration 007). The
+> legacy `LIKE '%"id"%'` JSON-pattern fallback is kept for rows
+> whose `primary_parent_id` was never set (typically imported
+> spreadsheet rows). The fallback now also double-checks the parsed
+> JSON to eliminate substring false-positives (e.g. `p_1` matching
+> `p_10`). Verified by 3 unit tests including an integration test
+> that creates real `students` rows via SQL and confirms both paths
+> resolve correctly.
+
 In `DiscountPipeline.resolveEligibility()` (`src/pipelines/discount-pipeline.ts`), sibling relationships are evaluated by scanning the `students` table's JSON column using a SQL `LIKE` query:
 
 ```sql

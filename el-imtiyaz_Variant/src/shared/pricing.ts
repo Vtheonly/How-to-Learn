@@ -277,3 +277,107 @@ export const TRANSPORT_TIER_TO_LINE_TYPE: Readonly<Record<TransportTier, string>
   [TransportTier.MEDIUM]: "transport_medium",
   [TransportTier.FAR]: "transport_premium",
 };
+
+// ── Issue 4.3: Transport installment (tranche) breakdown per tier ──────
+//
+// Background (software_review.md issue 4.3):
+//   The previous DEFAULT_FEE_SCHEDULE hard-coded transport tranches as
+//   T1=30,000, T2=15,000, T3=10,000 for every student. The Excel
+//   workbook's REF sheet documents that the installment split depends
+//   on the destination tier — the same total transport fee is paid
+//   back in different sized chunks depending on the route:
+//
+//     Tier 1 (nearby,        35,000 total) → 20,000 / 10,000 / 5,000
+//     Tier 2 (intermediate,  43,000 total) → 25,000 / 12,000 / 6,000
+//     Tier 3 (medium,        52,000 total) → 30,000 / 12,000 / 10,000
+//     Tier 4 (far,           55,000 total) → 30,000 / 15,000 / 10,000
+//
+//   Source: `suivis-clients-vault-text-only-no-code/04 - Sheets/REF —
+//   Reference Tables.md` (town transport zones table).
+//
+//   This fixes the "transport tranches fixed at 30k/15k/10k" gap by
+//   exposing the per-tier installment breakdown. The DEFAULT_FEE_SCHEDULE
+//   in `fee-schedule.entity.ts` keeps its flat fallback amounts (those
+//   drive the *initial* schedule that operators can edit); the new
+//   `resolveTransportInstallments()` helper is what services should call
+//   to know the expected split for a given destination.
+//
+//   The check is advisory only — the operator can always type a
+//   different amount into T1/T2/T3 if the family negotiated a custom
+//   payment plan. The lookup is used by validation logic and by the
+//   ingestion importer to flag rows whose typed installments don't
+//   match the documented tier breakdown.
+
+export interface TransportInstallments {
+  /** Total annual transport fee (matches `TRANSPORT_AMOUNT_BY_TIER`). */
+  total: number;
+  /** First tranche (Excel column W). */
+  t1: number;
+  /** Second tranche (Excel column X). */
+  t2: number;
+  /** Third tranche (Excel column Y). */
+  t3: number;
+  /** The tier this breakdown belongs to. */
+  tier: TransportTier;
+}
+
+export const TRANSPORT_INSTALLMENTS_BY_TIER: Readonly<
+  Record<TransportTier, TransportInstallments>
+> = {
+  [TransportTier.NEARBY]: {
+    tier: TransportTier.NEARBY,
+    total: 35000,
+    t1: 20000,
+    t2: 10000,
+    t3: 5000,
+  },
+  [TransportTier.INTERMEDIATE]: {
+    tier: TransportTier.INTERMEDIATE,
+    total: 43000,
+    t1: 25000,
+    t2: 12000,
+    t3: 6000,
+  },
+  [TransportTier.MEDIUM]: {
+    tier: TransportTier.MEDIUM,
+    total: 52000,
+    t1: 30000,
+    t2: 12000,
+    t3: 10000,
+  },
+  [TransportTier.FAR]: {
+    tier: TransportTier.FAR,
+    total: 55000,
+    t1: 30000,
+    t2: 15000,
+    t3: 10000,
+  },
+};
+
+/**
+ * Resolve the documented (T1, T2, T3) installment breakdown for a
+ * destination town. Returns `null` when the town is empty (no
+ * transport) — matching the convention used by
+ * `resolveTransportTier()`.
+ *
+ * The returned object includes the `total` transport fee for
+ * convenience — it equals the sum of the three tranches, which in
+ * turn matches `TRANSPORT_AMOUNT_BY_TIER[tier]`.
+ *
+ * Example:
+ *   resolveTransportInstallments("Boudouaou")
+ *     → { tier: "medium", total: 52000, t1: 30000, t2: 12000, t3: 10000 }
+ *
+ *   resolveTransportInstallments("Boumerdès")
+ *     → { tier: "nearby", total: 35000, t1: 20000, t2: 10000, t3: 5000 }
+ *
+ *   resolveTransportInstallments("")
+ *     → null
+ */
+export function resolveTransportInstallments(
+  town: string | null | undefined,
+): TransportInstallments | null {
+  const tier = resolveTransportTier(town);
+  if (tier === null) return null;
+  return TRANSPORT_INSTALLMENTS_BY_TIER[tier];
+}

@@ -28,9 +28,11 @@ import {
   resolveTuition,
   resolveTransportAmount,
   resolveTransportTier,
+  resolveTransportInstallments,
   TRANSPORT_AMOUNT_BY_TIER,
   TransportTier,
 } from "../shared/pricing";
+import { evaluateRuleCondition } from "../shared/rule-condition";
 
 /**
  * A soft validation warning. Excel's data-validation rules on column AG
@@ -193,11 +195,42 @@ export class LedgerService {
   ): Promise<Partial<LedgerEntry>> {
     const schedule = await this.feeSchedules.findActive();
     const ctx = this.buildFormulaContext(input, schedule);
-    const rules = await this.formulaRules.list({
+    const allRules = await this.formulaRules.list({
       scope: "ledger",
       isActive: true,
     });
-    rules.sort((a, b) => a.priority - b.priority);
+    allRules.sort((a, b) => a.priority - b.priority);
+
+    // ── Issue 10.4 / #13: filter rules by `condition_expr` ───────────
+    //
+    // The `FormulaRule.condition` field has existed on the entity since
+    // iteration 1 but was never read by any service — it was pure
+    // architectural dead weight. We now evaluate it against the row's
+    // fields and only keep rules whose condition matches (or whose
+    // condition is empty, which means "applies to every row").
+    //
+    // The condition mini-language is intentionally simple — see
+    // `shared/rule-condition.ts` for the supported syntax. Examples:
+    //   - `level = "PRIM"`            → only PRIM rows
+    //   - `optionCode = "TRNSP"`      → only transport students
+    //   - `level = "LYC" AND remise > 0`
+    //   - ``                          → applies to every row (default)
+    const rules = allRules.filter((rule) => {
+      if (!rule.condition || !String(rule.condition).trim()) return true;
+      const match = evaluateRuleCondition(rule.condition, ctx.fields);
+      if (!match.ok) {
+        // Log but do NOT block — a broken condition shouldn't take down
+        // the entire calculation pipeline.
+        logger.warn("ledger.rule.condition.evalFailed", {
+          ruleId: rule.id.value,
+          ruleName: rule.name,
+          condition: rule.condition,
+          error: match.error,
+        });
+        return true; // treat as "no condition"
+      }
+      return match.value;
+    });
 
     // ── FATAL FLAW FIX (issue §1 / #1 in software_review.md) ──────────
     //
@@ -338,29 +371,96 @@ export class LedgerService {
     const grandTotalRule = rules.find((r) => r.targetField === "grandTotal");
     const grandTotal = grandTotalRule ? this.evalNumeric(grandTotalRule, ctx) : 0;
 
+    // ── Issue 20: audit trail for calculations ─────────────────────
+    //
+    // Background (software_review.md issue 20): there was previously no
+    // record of which formula was used for which row, or what components
+    // composed it. We now emit a `ledger.entry.computed` event every
+    // time `computeFields()` runs successfully. The audit-log service
+    // already subscribes to ledger.* events; the new event lets the
+    // audit trail answer questions like "when was the last time this
+    // row's devisAnnuel was re-computed, and which rule produced it?".
+    //
+    // We deliberately include `ruleSummary` (the names of the rules
+    // that fired) so the audit record is self-contained even when the
+    // underlying FormulaRule rows are later edited or deleted.
+    const ruleSummary = rules.map((r) => ({
+      id: r.id.value,
+      name: r.name,
+      targetField: r.targetField,
+      priority: r.priority,
+      hadCondition: !!(r.condition && String(r.condition).trim()),
+    }));
+    await this.eventBus.publish("ledger.entry.computed", {
+      entityId: "(input)",
+      entityType: "LedgerEntry",
+      after: { devisAnnuel, totalVersements, totalCreance, grandTotal },
+      actor: { actorId: "system", actorName: "LedgerService.computeFields" },
+      metadata: {
+        studentName: input.studentName,
+        level: input.level,
+        optionCode: input.optionCode,
+        destination: input.destination,
+        ruleCount: rules.length,
+        rules: ruleSummary,
+      },
+    });
+
     return { devisAnnuel, totalVersements, totalCreance, grandTotal };
   }
 
-  async recomputeAll(): Promise<{
+  /**
+   * Recompute every ledger entry's derived fields.
+   *
+   * ── Issue 19: scalability ─────────────────────────────────────
+   *
+   * The previous version loaded every ledger entry into memory in a
+   * single shot (`pageSize: 10000`) and then iterated sequentially.
+   * For a school with ~390 active students that works, but the
+   * architecture was explicitly designed to scale to 10,000 entries
+   * (per the design notes in `software_review.md` issue 19), and a
+   * single-shot load of that size causes noticeable GC pressure and
+   * blocks the event loop for several seconds.
+   *
+   * We now paginate in fixed-size batches (default 200 rows). Each
+   * batch is processed, the computed values are persisted, and only
+   * then do we move to the next page. This keeps the working set
+   * small, lets the event loop breathe between batches, and produces
+   * the same result as the previous implementation.
+   *
+   * The page size is exposed as a parameter so callers can tune it
+   * (e.g. the FeeScheduleService's `feeSchedule.changed` handler uses
+   * the default; an admin-triggered bulk recompute could pass a
+   * larger value).
+   */
+  async recomputeAll(
+    options: { pageSize?: number } = {},
+  ): Promise<{
     recomputed: number;
     skipped: number;
     errors: any[];
   }> {
-    const entries = await this.ledger.list({ pageSize: 10000 });
+    const pageSize = Math.max(1, Math.min(1000, options.pageSize ?? 200));
     let recomputed = 0;
     let skipped = 0;
     const errors: any[] = [];
-
-    for (const entry of entries) {
-      try {
-        const computed = await this.computeFields(entry);
-        await this.ledger.update(entry.id.value, computed);
-        recomputed++;
-      } catch (err) {
-        skipped++;
-        errors.push({ id: entry.id.value, error: (err as Error).message });
+    let page = 1;
+    let batch: LedgerEntry[] = [];
+    do {
+      batch = await this.ledger.list({ page, pageSize });
+      if (batch.length === 0) break;
+      for (const entry of batch) {
+        try {
+          const computed = await this.computeFields(entry);
+          await this.ledger.update(entry.id.value, computed);
+          recomputed++;
+        } catch (err) {
+          skipped++;
+          errors.push({ id: entry.id.value, error: (err as Error).message });
+        }
       }
-    }
+      page++;
+    } while (batch.length === pageSize);
     return { recomputed, skipped, errors };
   }
 
@@ -513,16 +613,72 @@ export class LedgerService {
     }
 
     // ── Soft validations (advisory, mirror Excel's showErrorMessage=False) ──
-    if (
-      input.septemberBalance !== undefined &&
-      input.septemberBalance !== null
-    ) {
-      if (input.septemberBalance >= SEPTEMBER_BALANCE_MAX) {
+    //
+    // Issue 6.3 (iteration 4): the previous version only validated
+    // `septemberBalance` against the Excel AG-column rule. The Excel
+    // workbook does NOT define validations for the December (column AI)
+    // or March (column AK) receivable columns, but the software's
+    // data model treats them symmetrically — so we surface the same
+    // advisory warning for all three terms. The threshold matches
+    // Excel's AG-column rule (10,000 DZD) and is informational only —
+    // the save always proceeds. This gives operators forward visibility
+    // on any term where the unpaid balance is creeping up, without
+    // blocking the workflow.
+    const advisoryBalanceMax = SEPTEMBER_BALANCE_MAX;
+    const checkTermBalance = (
+      field: string,
+      label: string,
+      value: unknown,
+    ) => {
+      if (value === undefined || value === null) return;
+      const n = Number(value);
+      if (!Number.isFinite(n)) return;
+      if (n >= advisoryBalanceMax) {
         warnings.push({
-          field: "septemberBalance",
-          value: input.septemberBalance,
-          message: `September balance (${input.septemberBalance}) is at or above the advisory limit of ${SEPTEMBER_BALANCE_MAX} DZD. Excel's data validation on column AG is configured as showErrorMessage=False (advisory only), so the save proceeds.`,
+          field,
+          value: n,
+          message: `${label} balance (${n}) is at or above the advisory limit of ${advisoryBalanceMax} DZD. Excel's data validation on column AG is configured as showErrorMessage=False (advisory only); the save proceeds. (Issue 6.3: the same advisory is now applied to December and March columns for symmetry.)`,
         });
+      }
+    };
+    checkTermBalance("septemberBalance", "September", input.septemberBalance);
+    checkTermBalance("decemberBalance", "December", input.decemberBalance);
+    checkTermBalance("marchBalance", "March", input.marchBalance);
+
+    // ── Issue 4.3: transport tranche mismatch advisory ─────────────
+    //
+    // When the student has OPTION=TRNSP and a destination town, the
+    // expected (T1, T2, T3) split comes from the documented tier
+    // breakdown in `shared/pricing.ts`. If the operator typed amounts
+    // that don't match (e.g. T1=30k for a NEARBY-tier town whose
+    // documented T1 is 20k), we surface an advisory warning. The save
+    // is NOT blocked — the operator may have negotiated a custom plan.
+    if (
+      (input.optionCode ?? "").toUpperCase() === "TRNSP" &&
+      input.destination &&
+      String(input.destination).trim()
+    ) {
+      const expected = resolveTransportInstallments(input.destination);
+      if (expected) {
+        const t1 = Number(input.t1 ?? 0);
+        const t2 = Number(input.t2 ?? 0);
+        const t3 = Number(input.t3 ?? 0);
+        const mismatchParts: string[] = [];
+        if (t1 > 0 && t1 !== expected.t1) mismatchParts.push(`T1=${t1} (expected ${expected.t1})`);
+        if (t2 > 0 && t2 !== expected.t2) mismatchParts.push(`T2=${t2} (expected ${expected.t2})`);
+        if (t3 > 0 && t3 !== expected.t3) mismatchParts.push(`T3=${t3} (expected ${expected.t3})`);
+        if (mismatchParts.length > 0) {
+          warnings.push({
+            field: "transportTranches",
+            value: { t1, t2, t3, expected },
+            message:
+              `Issue 4.3: transport tranches for destination "${input.destination}" ` +
+              `(tier: ${expected.tier}) don't match the documented breakdown: ` +
+              mismatchParts.join(", ") +
+              `. Total expected: ${expected.total} DZD. The save proceeds — ` +
+              `the operator may have negotiated a custom payment plan.`,
+          });
+        }
       }
     }
 

@@ -50,6 +50,14 @@ export interface ImportLedgerResult {
   skipped: number;
   errors: Array<{ row: number; error: string }>;
   templateId: string;
+  /**
+   * Issue 8.1 (iteration 4): advisory warnings about off-by-one
+   * Excel references detected during ingestion. The most prominent
+   * example is `S94 = 110000-J95` (should reference J94, not J95).
+   * We don't fix the value — we surface the anomaly so the operator
+   * can decide whether to manually correct the imported data.
+   */
+  offByOneWarnings: Array<{ row: number; column: string; formula: string; referencedRow: number; message: string }>;
 }
 
 export interface ImportCommentsResult {
@@ -271,6 +279,7 @@ export class ExcelIngestionService {
     let imported = 0;
     let skipped = 0;
     const errors: Array<{ row: number; error: string }> = [];
+    const offByOneWarnings: Array<{ row: number; column: string; formula: string; referencedRow: number; message: string }> = [];
 
     // Header row should be row 1; data starts row 2.
     const headerRow = ws.getRow(1);
@@ -303,6 +312,50 @@ export class ExcelIngestionService {
           continue;
         }
         consecutiveEmpty = 0;
+
+        // ── Issue 8.1: detect off-by-one references in this row ──────
+        //
+        // Excel's S94 cell contains `=110000-J95` — it references
+        // J95 (the row below) instead of J94 (the same row). The
+        // software would never produce this bug because it uses a
+        // uniform formula, but it also means the software can't
+        // replicate the actual data in row 94 if importing from
+        // Excel. We detect the pattern (any cell in the row whose
+        // formula references a different row than the cell itself)
+        // and surface an advisory warning so the operator can decide
+        // whether the imported value is correct or needs manual
+        // correction.
+        //
+        // The detection is intentionally narrow — we only flag the
+        // exact pattern that's documented in the source workbook:
+        // a formula in column S (or any payment column) that
+        // subtracts J{row+1} or J{row-1}. We don't try to detect
+        // every possible off-by-one because the workbook contains
+        // legitimate cross-row formulas (e.g. BON sheet VLOOKUPs).
+        const rowWarnings = detectOffByOneReferences(row, r);
+        for (const w of rowWarnings) {
+          offByOneWarnings.push({
+            row: r,
+            column: w.column,
+            formula: w.formula,
+            referencedRow: w.referencedRow,
+            message:
+              `Issue 8.1: column ${w.column} on row ${r} has formula ` +
+              `"${w.formula}" which references row ${w.referencedRow} ` +
+              `(expected row ${r}). This is the documented S94 off-by-one ` +
+              `pattern. The imported value is preserved as-is — verify ` +
+              `whether the spreadsheet's value is correct or needs ` +
+              `manual correction.`,
+          });
+          logger.warn("excel.ingestion.offByOneReference", {
+            filePath,
+            sheetName: ws.name,
+            row: r,
+            column: w.column,
+            formula: w.formula,
+            referencedRow: w.referencedRow,
+          });
+        }
 
         // ── Issues 11 + 16 (iteration 3): persist Excel's computed ──
         //
@@ -356,6 +409,7 @@ export class ExcelIngestionService {
       skipped,
       errors,
       templateId: "",
+      offByOneWarnings,
     };
   }
 
@@ -714,6 +768,63 @@ function readRowAsLedgerInput(
   });
 
   return { input, extras };
+}
+
+/**
+ * Detect off-by-one Excel formula references in a row (issue 8.1).
+ *
+ * The source workbook's S94 cell contains `=110000-J95` — it
+ * references row 95 (the row below) instead of row 94 (the same
+ * row). The software would never produce this bug because it uses a
+ * uniform formula, but it also means the software can't replicate
+ * the actual data in row 94 if importing from Excel.
+ *
+ * This helper scans every formula-carrying cell in the row and looks
+ * for references to `J{row±1}` (specifically: any formula that
+ * subtracts or adds a cell on an adjacent row from column J, the
+ * REMISE column). The pattern is narrow on purpose — we don't want
+ * to flag legitimate cross-row formulas (e.g. BON sheet VLOOKUPs).
+ *
+ * Returns an array of `{ column, formula, referencedRow }` objects
+ * for each detected off-by-one reference. The caller surfaces these
+ * as advisory warnings; the imported value is preserved as-is.
+ */
+function detectOffByOneReferences(
+  row: ExcelJS.Row,
+  sourceRow: number,
+): Array<{ column: string; formula: string; referencedRow: number }> {
+  const out: Array<{ column: string; formula: string; referencedRow: number }> = [];
+  row.eachCell((cell, _colNumber) => {
+    const formula = (cell as any).formula as string | undefined;
+    if (!formula || typeof formula !== "string") return;
+    // Match patterns like `J95`, `J94`, etc. — column J followed by
+    // a row number. We extract the row number and compare it to the
+    // cell's own row.
+    const colLetter = cell.address.replace(/\d+$/, "");
+    // Only scan payment-related columns (the issue specifically calls
+    // out S, but we check R-Y for completeness — they're the columns
+    // where a J reference would be meaningful for balance math).
+    if (!/^[RSTUVWXY]$/.test(colLetter)) return;
+    const matches = formula.matchAll(/J(\d+)/g);
+    for (const m of matches) {
+      const refRow = Number(m[1]);
+      if (!Number.isFinite(refRow)) continue;
+      // Only flag references that are exactly 1 row off (the
+      // documented pattern). A 5-row offset is likely intentional
+      // (e.g. a sibling reference).
+      if (Math.abs(refRow - sourceRow) === 1) {
+        out.push({
+          column: colLetter,
+          formula,
+          referencedRow: refRow,
+        });
+        // One warning per cell is enough — break out of the matchAll
+        // loop after the first hit.
+        break;
+      }
+    }
+  });
+  return out;
 }
 
 function toNumber(v: unknown): number {

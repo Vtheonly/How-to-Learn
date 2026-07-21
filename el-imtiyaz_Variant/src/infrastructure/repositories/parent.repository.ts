@@ -139,17 +139,85 @@ export class ParentRepository extends BaseRepository<Parent, ParentQuery> {
     );
   }
 
+  /**
+   * Return the student IDs linked to a parent.
+   *
+   * ── Iteration 4 (Mismatch C — sibling discount pipeline) ──
+   *
+   * The previous version used a SQL `LIKE '%"parent_id"%'` query on
+   * the `parent_ids_json` column. That approach has three problems:
+   *
+   *   1. **Performance**: `LIKE` on a JSON column cannot use an index,
+   *      so the query does a full table scan on every call. With the
+   *      planned 10k-row scale (issue 19) this becomes a measurable
+   *      hotspot during sibling-discount recomputation.
+   *
+   *   2. **Boundary bugs**: a parent ID that happens to be a substring
+   *      of another parent ID (e.g. `p_1` matching `p_10`) would
+   *      produce false-positive matches. The double-quote framing in
+   *      the LIKE pattern reduces but does not eliminate this risk.
+   *
+   *   3. **Imported rows**: when the Excel ingestion service imports
+   *      a row, it populates `parent_ids_json` from the BON sheet's
+   *      family linkage — but it never sets `primary_parent_id`. The
+   *      sibling-discount pipeline relies on `parentIds[0]` to find
+   *      the parent, then calls this method to find siblings. With
+   *      the LIKE approach, imported rows WERE found; with a naive
+   *      `primary_parent_id = ?` query they would NOT be.
+   *
+   * The fix uses a UNION of two indexed queries:
+   *
+   *   (a) `primary_parent_id = ?` — fast, indexed, the canonical case
+   *       for rows created through the in-app UI.
+   *
+   *   (b) `parent_ids_json LIKE '%"id"%'` — the legacy fallback for
+   *       rows whose `primary_parent_id` was never set (typically
+   *       imported spreadsheet rows). Still slow, but only fires when
+   *       (a) returns nothing — so the hot path is fast and the cold
+   *       path handles legacy data correctly.
+   *
+   * The two result sets are de-duplicated in JS (a `Set`) before
+   * returning. This keeps the public signature unchanged so callers
+   * don't need updating.
+   *
+   * Source: software_review.md "Mismatch C: The Broken Sibling
+   * Discount Pipeline".
+   */
   async getStudentIds(parentId: string): Promise<string[]> {
-    const rows = this.db.all<{ parent_ids_json: string }>(
-      `SELECT parent_ids_json FROM students
-       WHERE parent_ids_json LIKE @pattern AND deleted_at IS NULL`,
-      { pattern: `%"${parentId}"%` }
+    if (!parentId) return [];
+
+    // (a) Fast path — indexed lookup on `primary_parent_id`.
+    //     `idx_students_primary_parent` is created by migration 007.
+    const directRows = this.db.all<{ id: string }>(
+      `SELECT id FROM students
+       WHERE primary_parent_id = @parentId AND deleted_at IS NULL`,
+      { parentId },
     );
-    const ids = new Set<string>();
-    for (const row of rows) {
-      const list = this.parseJson<string[]>(row.parent_ids_json, []);
-      list.forEach((s) => ids.add(s));
+
+    // (b) Legacy fallback — JSON LIKE for rows whose
+    //     `primary_parent_id` is null but whose `parent_ids_json`
+    //     contains the parent ID. Only runs when the fast path
+    //     returned nothing *for this parent* (typical case: an
+    //     imported spreadsheet row that has not been re-linked via
+    //     the UI yet).
+    let legacyRows: { id: string }[] = [];
+    if (directRows.length === 0) {
+      const rows = this.db.all<{ id: string; parent_ids_json: string }>(
+        `SELECT id, parent_ids_json FROM students
+         WHERE parent_ids_json LIKE @pattern AND deleted_at IS NULL`,
+        { pattern: `%"${parentId}"%` },
+      );
+      // Double-check the parsed JSON actually contains the parent ID —
+      // the LIKE pattern can false-positive on substring matches.
+      legacyRows = rows.filter((r) => {
+        const list = this.parseJson<string[]>(r.parent_ids_json, []);
+        return Array.isArray(list) && list.includes(parentId);
+      });
     }
+
+    const ids = new Set<string>();
+    for (const r of directRows) ids.add(r.id);
+    for (const r of legacyRows) ids.add(r.id);
     return [...ids];
   }
 

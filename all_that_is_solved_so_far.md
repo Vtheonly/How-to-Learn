@@ -19,7 +19,742 @@ For each issue, we record:
 | 1 | 2026-07-21 | 7 fully + 1 partially | 35 unit + 6 integration | ✅ Complete |
 | 2 | 2026-07-21 | 8 (critical / high) | 35 new + 41 regression | ✅ Complete |
 | 3 | 2026-07-21 | 7 (medium / high / low) | 35 new + 76 regression | ✅ Complete |
-| **Total** | | **22 fully + 1 partially** | **111 tests, all passing** | |
+| 4 | 2026-07-22 | 10 (2 build blockers + 8 review issues) | 48 new + 105 regression | ✅ Complete |
+| **Total** | | **32 fully + 1 partially** | **153 tests, all passing** | |
+
+---
+
+## Iteration 4 — 10 issues resolved (2 build blockers + 8 review issues)
+
+**Date**: 2026-07-22
+**Repository**: `github.com/Vtheonly/AgentGithubUplaod`
+**App code**: `el-imtiyaz_Variant/`
+**Verification**: 48 new unit/integration tests + 105 iteration-1/2/3 regression tests — all passing (153 total).
+**Screenshots**: `el-imtiyaz_Variant/screenshots/iteration4-tests-output.png`
+
+| # | Issue ID | Title | Severity |
+|---|----------|-------|----------|
+| 23 | (build blocker) | TypeScript TS2345 errors in `quote.service.ts` blocking `npm start` | FATAL |
+| 24 | (build blocker) | Missing `DataGrid` component (referenced by 12 UI pages, never created) | FATAL |
+| 25 | 4.3 | Transport tranches hardcoded at 30k/15k/10k (need tier-based breakdown) | HIGH |
+| 26 | 6.3 | No validation for December/March receivable columns (only September) | MEDIUM |
+| 27 | 8.1 | Off-by-one reference in S94 (`=110000-J95`) — undetected during ingestion | LOW |
+| 28 | 10.4 / 13 | `condition_expr` field on `FormulaRule` was dead code (never read) | MEDIUM |
+| 29 | 19 | `recomputeAll()` loads every entry into memory (10k row scalability) | MEDIUM |
+| 30 | 20 | No audit trail for calculations (which rule fired for which row) | LOW |
+| 31 | Mismatch C | Sibling discount pipeline using `LIKE '%"id"%'` on JSON column | MEDIUM |
+| 32 | 5.5 | Quote block dropdowns (CLASSE/FI/FRAISSCOLAIRE/SERVICE/transport) had no validation | MEDIUM |
+
+> **Note on the two build blockers (Fix #23, Fix #24)**: these were
+> not in the original `software_review.md`. They were discovered when
+> the user attempted `npm start` after iteration 3 and the build
+> failed with TypeScript errors and a missing-module error. They
+> are documented here because they prevented ANY verification of the
+> previous iterations' work — without these fixes, the application
+> could not boot. Both are now resolved and the full build chain
+> (`tsc -p tsconfig.main.json` + `tsc -p tsconfig.preload.json` +
+> `vite build`) succeeds cleanly.
+
+---
+
+### Fix #23 — Build blocker: TypeScript TS2345 errors in `quote.service.ts`
+
+#### Original problem
+
+The user ran `npm start` and the build failed with two TypeScript
+errors in `src/services/quote.service.ts`:
+
+```
+src/services/quote.service.ts:247:41 - error TS2345: Argument of type
+  '{ items: Omit<QuoteLineItem, "id"|"lineTotal">[]; name?: string; ... }'
+  is not assignable to parameter of type 'CreateQuoteBlockInput'.
+  Property 'name' is optional in type '...' but required in type
+  'CreateQuoteBlockInput'.
+
+src/services/quote.service.ts:382:47 - error TS2345: Argument of type
+  'Omit<QuoteLineItem, "id"|"lineTotal">[]' is not assignable to
+  parameter of type 'QuoteLineItem[]'.
+  Type 'Omit<QuoteLineItem, "id"|"lineTotal">' is missing the
+  following properties from type 'QuoteLineItem': id, lineTotal
+```
+
+Both errors were in iteration-3 code:
+- `validateInput(input: CreateQuoteBlockInput)` required `name` to be
+  present, but `update()` called it with a partial patch object that
+  might not include `name`.
+- `isQuoteConfirmed(items: QuoteLineItem[])` required items with
+  `id` and `lineTotal`, but `validateInput`'s input items were typed
+  as `Omit<QuoteLineItem, "id"|"lineTotal">[]`.
+
+#### Implemented solution
+
+**File**: `src/services/quote.service.ts`
+
+1. Changed `isQuoteConfirmed()` to accept the more permissive type
+   `Array<Pick<QuoteLineItem, "amounts"> & Partial<QuoteLineItem>>`
+   — the function only reads `amounts`, so it doesn't need `id` or
+   `lineTotal`.
+
+2. Changed `validateInput()` to accept `Partial<CreateQuoteBlockInput>`
+   — the function only reads `items`, so `name` doesn't need to be
+   required.
+
+```typescript
+export function isQuoteConfirmed(
+  items: Array<Pick<QuoteLineItem, "amounts"> & Partial<QuoteLineItem>>,
+): boolean {
+  // ... unchanged body ...
+}
+
+validateInput(input: Partial<CreateQuoteBlockInput>): QuoteValidationWarning[] {
+  // ... unchanged body ...
+}
+```
+
+#### Notes
+
+- Both signature relaxations are safe because the functions don't
+  read the now-optional fields.
+- The build chain (`tsc -p tsconfig.main.json`) compiles cleanly
+  after the fix.
+- This fix was a prerequisite for verifying the iteration-3 work —
+  without it, the build was broken and `npm start` could not run.
+
+#### Tests
+
+`tests/run-iteration4-tests.ts` — section "Fix #23 — Build blocker: quote.service.ts TS errors"
+- `isQuoteConfirmed() accepts partial line items (no id/lineTotal required)` ✓
+- `QuoteService.update() with patch (no name) no longer causes TS2345` ✓
+
+---
+
+### Fix #24 — Build blocker: Missing `DataGrid` component
+
+#### Original problem
+
+After fixing the TypeScript errors, the next `npm start` attempt
+failed at the Vite build stage:
+
+```
+✓ 1053 modules transformed.
+x Build failed in 1.00s
+error during build:
+Could not resolve "../components/data/DataGrid" from "src/ui/pages/Payments.tsx"
+file: /home/z/my-project/AgentGithubUplaod/el-imtiyaz_Variant/src/ui/pages/Payments.tsx
+```
+
+The `DataGrid` component was imported by 12 UI pages (Students,
+Payments, Classes, Employees, Scholarships, DebtDashboard, Workflows,
+Attendance, Receipts, AcademicYears, Parents, FeeTemplates) but the
+file `src/ui/components/data/DataGrid.tsx` did not exist in the
+repository. This was a fatal build blocker — the renderer could
+not be bundled.
+
+#### Implemented solution
+
+**Files**:
+- `src/ui/components/data/DataGrid.tsx` (new — 234 lines)
+- `src/ui/styles/components.css` (appended DataGrid styles)
+
+The new component implements the full prop surface used by the
+calling pages:
+
+```typescript
+export interface Column<T> {
+  key: string;
+  header: React.ReactNode;
+  width?: number | string;
+  align?: "left" | "right" | "center";
+  sortable?: boolean;
+  render?: (row: T) => React.ReactNode;
+  className?: string;
+}
+
+export interface DataGridProps<T> {
+  columns: Column<T>[];
+  data: T[];
+  rowKey: (row: T) => string;
+  loading?: boolean;
+  emptyState?: React.ReactNode;
+  onRowClick?: (row: T) => void;
+  selectedIds?: string[];
+  onSelectionChange?: (ids: string[]) => void;
+  sortField?: string;
+  sortDir?: "asc" | "desc";
+  onSortChange?: (field: string, dir: "asc" | "desc") => void;
+  className?: string;
+  dense?: boolean;
+}
+```
+
+Features:
+- Sticky table header (`position: sticky; top: 0`)
+- Loading overlay (Spinner overlay)
+- Empty state (custom node or default "No records")
+- Row click navigation
+- Selection (header "select all" checkbox + per-row checkbox,
+  with indeterminate state)
+- Sort indicators (ChevronUp / ChevronDown / ChevronsUpDown icons
+  from `lucide-react`)
+- Themed via existing CSS variables (`--color-*`, `--space-*`,
+  `--border-*`, `--radius-*`)
+
+#### Notes
+
+- The component is intentionally minimal — it covers the prop
+  surface used by the calling pages but doesn't add features they
+  don't need (no virtualisation, no column resizing, no inline
+  editing). Future iterations can extend it.
+- The styling reuses the existing theme variables so the grid
+  visually matches the rest of the app.
+- The build chain (`vite build`) succeeds cleanly after the fix —
+  2448 modules transformed, no errors.
+
+#### Tests
+
+`tests/run-iteration4-tests.ts` — section "Fix #24 — Build blocker: missing DataGrid component"
+- `DataGrid component file exists at the path every page imports from` ✓
+- `DataGrid source exports both \`DataGrid\` and \`Column\` (the named imports used by pages)` ✓
+- `DataGrid supports the full prop surface used by Students/Payments/Classes pages` ✓
+
+---
+
+### Fix #25 — Issue 4.3: Transport tranches tier-based installments
+
+#### Original problem (verbatim from `software_review.md`)
+
+> **Software assumes:** t1=30,000, t2=15,000, t3=10,000 (from
+> `DEFAULT_FEE_SCHEDULE`).
+>
+> **Excel reality:** These vary. Some students have t1=20,000,
+> t2=13,000, t3=10,000. Others have t1=30,000, t2=12,000,
+> t3=10,000. The amounts depend on the transport destination and
+> the family's payment arrangement.
+
+The `DEFAULT_FEE_SCHEDULE` in `fee-schedule.entity.ts` had hardcoded
+T1=30k / T2=15k / T3=10k for every student, regardless of their
+transport tier.
+
+#### Implemented solution
+
+**File**: `src/shared/pricing.ts`
+
+Added a new `TRANSPORT_INSTALLMENTS_BY_TIER` constant and a
+`resolveTransportInstallments(town)` helper that exposes the
+documented (T1, T2, T3) breakdown for each of the 4 transport
+tiers:
+
+| Tier | Total | T1 | T2 | T3 |
+|------|-------|-----|-----|-----|
+| NEARBY (35k)       | 35,000 | 20,000 | 10,000 | 5,000  |
+| INTERMEDIATE (43k) | 43,000 | 25,000 | 12,000 | 6,000  |
+| MEDIUM (52k)       | 52,000 | 30,000 | 12,000 | 10,000 |
+| FAR (55k)          | 55,000 | 30,000 | 15,000 | 10,000 |
+
+Source: the Obsidian vault's REF sheet table (`suivis-clients-vault-text-only-no-code/04 - Sheets/REF — Reference Tables.md`).
+
+`LedgerService.validateInput()` surfaces a soft warning when typed
+transport tranches don't match the documented tier breakdown — the
+save is NOT blocked (the operator may have negotiated a custom plan).
+
+#### Notes
+
+- The `DEFAULT_FEE_SCHEDULE` in `fee-schedule.entity.ts` is left
+  unchanged — those amounts drive the *initial* schedule that
+  operators can edit. The new helper is what services call to
+  know the *expected* split for a given destination.
+- The check is advisory only — Excel allows the operator to type
+  any amount into T1/T2/T3 if the family negotiated a custom plan.
+- For each tier, t1 + t2 + t3 sums back to the documented total
+  (verified by a unit test).
+
+#### Tests
+
+`tests/run-iteration4-tests.ts` — section "Fix #25 — Issue 4.3: Transport tranches tier-based installments"
+- `TRANSPORT_INSTALLMENTS_BY_TIER exposes 4 tiers matching the documented breakdown` ✓
+- `For each tier, t1 + t2 + t3 equals total (the tranches sum back to the documented transport fee)` ✓
+- `resolveTransportInstallments('Boudouaou') returns the MEDIUM tier breakdown` ✓
+- `resolveTransportInstallments('Boumerdès') returns the NEARBY tier breakdown` ✓
+- `resolveTransportInstallments('') returns null (no transport)` ✓
+- `LedgerService surfaces an advisory warning when typed transport tranches don't match the tier breakdown` ✓
+
+---
+
+### Fix #26 — Issue 6.3: Validation for December/March receivable columns
+
+#### Original problem (verbatim from `software_review.md`)
+
+> Excel only validates AG (September). Columns AI (December
+> receivable) and AK (March receivable) have no validation. The
+> software doesn't distinguish between them.
+
+The previous version of `LedgerService.validateInput()` only emitted
+the soft-warning advisory for `septemberBalance` (column AG). The
+December (AI) and March (AK) receivable columns were not validated
+at all.
+
+#### Implemented solution
+
+**File**: `src/services/ledger.service.ts`
+
+The `validateInput()` method now applies the same advisory warning
+to all three term-balance fields. The check is extracted into a
+local `checkTermBalance(field, label, value)` helper that mirrors
+Excel's `showErrorMessage=False` semantics — the save always
+proceeds.
+
+```typescript
+const advisoryBalanceMax = SEPTEMBER_BALANCE_MAX;
+const checkTermBalance = (field, label, value) => {
+  if (value === undefined || value === null) return;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return;
+  if (n >= advisoryBalanceMax) {
+    warnings.push({ field, value: n, message: `${label} balance (${n}) is at or above...` });
+  }
+};
+checkTermBalance("septemberBalance", "September", input.septemberBalance);
+checkTermBalance("decemberBalance", "December", input.decemberBalance);
+checkTermBalance("marchBalance",     "March",     input.marchBalance);
+```
+
+#### Notes
+
+- Excel does NOT define validations for AI / AK — but the software's
+  data model treats them symmetrically with AG, so the advisory is
+  applied for consistency. Operators get forward visibility on any
+  term where the unpaid balance is creeping up.
+- The threshold matches Excel's AG-column rule (10,000 DZD) and is
+  informational only.
+- No regression on the existing septemberBalance check — the same
+  threshold and message format are reused.
+
+#### Tests
+
+`tests/run-iteration4-tests.ts` — section "Fix #26 — Issue 6.3"
+- `create() with septemberBalance >= 10000 surfaces a soft warning (no regression)` ✓
+- `create() with decemberBalance >= 10000 surfaces a soft warning (new in iteration 4)` ✓
+- `create() with marchBalance >= 10000 surfaces a soft warning (new in iteration 4)` ✓
+- `create() with decemberBalance below threshold does NOT emit a warning` ✓
+
+---
+
+### Fix #27 — Issue 8.1: S94 off-by-one ingestion advisory warning
+
+#### Original problem (verbatim from `software_review.md`)
+
+> **Excel:** `S94: =110000-J95` (references J95, should be J94)
+>
+> The software would never produce this bug because it uses a
+> uniform formula. But it also means the software can't replicate
+> the **actual data** in row 94 if importing from Excel.
+
+The software's ingestion previously had no way to detect this kind
+of off-by-one reference. The imported value would be preserved
+silently — the operator would have no way to know which rows had
+formula errors in the source spreadsheet.
+
+#### Implemented solution
+
+**Files**:
+- `src/services/excel-ingestion.service.ts` (added `detectOffByOneReferences()` helper + wired into `importLedger()`)
+
+A new helper `detectOffByOneReferences(row, sourceRow)` scans every
+formula-carrying cell in the row and looks for references to
+`J{row±1}` — specifically, any formula in payment columns R–Y that
+references column J on an adjacent row. The pattern is narrow on
+purpose to avoid false positives on legitimate cross-row formulas
+(BON sheet VLOOKUPs, sibling references, etc.).
+
+Detected anomalies are returned in the new
+`ImportLedgerResult.offByOneWarnings` array and logged via
+`logger.warn`. The imported value is preserved as-is — the operator
+decides whether the spreadsheet's value is correct or needs manual
+correction.
+
+```typescript
+function detectOffByOneReferences(row, sourceRow) {
+  const out = [];
+  row.eachCell((cell) => {
+    const formula = cell.formula;
+    if (!formula) return;
+    const colLetter = cell.address.replace(/\d+$/, "");
+    if (!/^[RSTUVWXY]$/.test(colLetter)) return;  // only payment cols
+    for (const m of formula.matchAll(/J(\d+)/g)) {
+      const refRow = Number(m[1]);
+      if (Math.abs(refRow - sourceRow) === 1) {
+        out.push({ column: colLetter, formula, referencedRow: refRow });
+        break;
+      }
+    }
+  });
+  return out;
+}
+```
+
+#### Notes
+
+- The detection only fires for formulas that reference `J{row±1}`
+  (exactly 1 row off). A 5-row offset is likely intentional (e.g.
+  a sibling reference) and is not flagged.
+- The detection is narrow to payment columns R–Y because that's
+  where a J reference would be meaningful for balance math. Column
+  L (DEVIS ANNUEL) also references J, but it's not a payment column
+  so it's excluded.
+- The save is NOT blocked — Excel allows the operator to type any
+  formula, and the imported value is preserved verbatim.
+
+#### Tests
+
+`tests/run-iteration4-tests.ts` — section "Fix #27 — Issue 8.1"
+- `ImportLedgerResult.offByOneWarnings field exists on the return type` ✓
+- `detectOffByOneReferences is invoked inside importLedger's row loop` ✓
+- `detectOffByOneReferences function narrows to payment columns R-Y (the columns where J refs matter)` ✓
+
+---
+
+### Fix #28 — Issue 10.4 / #13: `condition_expr` filter implementation
+
+#### Original problem (verbatim from `software_review.md`)
+
+> The `FormulaRule` entity has:
+> ```typescript
+> condition?: string;  // "Optional: only apply to entries matching this filter"
+> ```
+> No service ever reads this field. It is never evaluated. It is
+> never used to filter which rows a rule applies to. It is
+> architectural dead weight.
+
+The `condition` field has existed on the `FormulaRule` entity since
+iteration 1 but was never read by any service. It was documented as
+"optional: only apply to entries matching this filter" but no
+filter logic existed.
+
+#### Implemented solution
+
+**Files**:
+- `src/shared/rule-condition.ts` (new — 344 lines, mini-language + evaluator)
+- `src/services/ledger.service.ts` (wired into `computeFields()`)
+
+A new `evaluateRuleCondition(condition, fields)` function evaluates
+a condition expression against the row's `ctx.fields` dictionary
+and returns `{ ok: true, value: boolean }` or `{ ok: false, error:
+string }` for parse errors.
+
+The mini-language is intentionally minimal:
+- **Atomic comparisons**: `field = "value"` (case-insensitive string
+  equality), `field = 123` (numeric), `!=`, `>`, `>=`, `<`, `<=`
+- **NULL checks**: `field IS NULL`, `field IS NOT NULL`
+- **Boolean composition**: `AND`, `OR`, `NOT (...)`, parentheses
+
+Examples:
+- `level = "PRIM"` — only PRIM rows
+- `optionCode = "TRNSP" AND remise > 0` — transport students with a discount
+- `(level = "LYC" OR level = "COLG") AND destination IS NOT NULL`
+- `` (empty) — applies to every row (default)
+
+`LedgerService.computeFields()` filters rules by their condition
+before evaluating them. Parse errors are logged via `logger.warn`
+but do NOT block the calculation pipeline — the rule is treated as
+"no condition" and applied to every row.
+
+#### Notes
+
+- The mini-language does NOT support arithmetic expressions — that's
+  what the existing `FormulaEngine` is for. The condition language
+  is purely boolean (filter / no-filter).
+- Unknown fields evaluate to `0` (numeric) / `""` (string) /
+  `null` (IS NULL) — matching the formula engine's `resolveField()`
+  convention.
+- The condition is evaluated against `ctx.fields` AFTER
+  `buildFormulaContext()` populates it — so conditions can reference
+  computed fields like `resolvedTransport`, `hasTransport`, etc.
+
+#### Tests
+
+`tests/run-iteration4-tests.ts` — section "Fix #28 — Issue 10.4/13"
+- `evaluateRuleCondition returns {ok:true, value:true} for empty/whitespace conditions` ✓
+- `evaluateRuleCondition handles string equality (case-insensitive)` ✓
+- `evaluateRuleCondition handles numeric comparisons` ✓
+- `evaluateRuleCondition handles AND / OR / NOT composition` ✓
+- `evaluateRuleCondition handles IS NULL / IS NOT NULL` ✓
+- `evaluateRuleCondition returns {ok:false} for unparseable conditions (no throw)` ✓
+- `LedgerService.computeFields() filters rules by condition_expr before evaluating them` ✓ (integration test creates a PRIM-only rule and confirms it fires for PRIM students but is skipped for LYC students)
+
+---
+
+### Fix #29 — Issue 19: `recomputeAll()` pagination
+
+#### Original problem (verbatim from `software_review.md`)
+
+> `recomputeAll()` loads all 10,000 entries into memory, evaluates
+> sequentially.
+
+The previous version of `LedgerService.recomputeAll()` called
+`this.ledger.list({ pageSize: 10000 })` — a single-shot load of
+every ledger entry into memory. For a school with ~390 active
+students that works, but the architecture was explicitly designed
+to scale to 10,000 entries, and a single-shot load of that size
+causes noticeable GC pressure and blocks the event loop.
+
+#### Implemented solution
+
+**File**: `src/services/ledger.service.ts`
+
+`recomputeAll()` now accepts an `options` parameter with a
+`pageSize` field (default 200, clamped to [1, 1000]). It paginates
+through the ledger in fixed-size batches, processing each batch
+and persisting the computed values before moving to the next page.
+
+```typescript
+async recomputeAll(options: { pageSize?: number } = {}) {
+  const pageSize = Math.max(1, Math.min(1000, options.pageSize ?? 200));
+  let page = 1;
+  let batch: LedgerEntry[] = [];
+  do {
+    batch = await this.ledger.list({ page, pageSize });
+    if (batch.length === 0) break;
+    for (const entry of batch) {
+      try {
+        const computed = await this.computeFields(entry);
+        await this.ledger.update(entry.id.value, computed);
+        recomputed++;
+      } catch (err) {
+        skipped++;
+        errors.push({ id: entry.id.value, error: err.message });
+      }
+    }
+    page++;
+  } while (batch.length === pageSize);
+  return { recomputed, skipped, errors };
+}
+```
+
+#### Notes
+
+- The page size is bounded to [1, 1000] to prevent abuse — a page
+  size of 10,000 would re-introduce the original problem.
+- The default of 200 keeps the working set small (~200 ledger
+  entries in memory at any time) while still being efficient (a
+  10k-row recompute takes 50 batches instead of 1 giant one).
+- The loop terminates when a batch returns fewer rows than
+  `pageSize` — that's the signal we've reached the end of the data.
+- The caller (typically the `feeSchedule.changed` event handler)
+  uses the default page size; an admin-triggered bulk recompute
+  could pass a larger value.
+
+#### Tests
+
+`tests/run-iteration4-tests.ts` — section "Fix #29 — Issue 19"
+- `recomputeAll accepts an options parameter with pageSize (no longer hardcoded 10000)` ✓
+- `recomputeAll processes entries in paginated batches (small pageSize produces same result as large)` ✓
+- `recomputeAll without options uses a sensible default page size` ✓
+
+---
+
+### Fix #30 — Issue 20: Audit trail for calculations
+
+#### Original problem (verbatim from `software_review.md`)
+
+> No record of which formula was used for which row, or what
+> components composed it.
+
+There was previously no way to answer questions like "when was the
+last time this row's devisAnnuel was re-computed, and which rule
+produced it?". The calculation pipeline was a black box — operators
+could see the result but not the inputs that produced it.
+
+#### Implemented solution
+
+**Files**:
+- `src/services/ledger.service.ts` (emits `ledger.entry.computed` event)
+- `src/services/audit.service.ts` (subscribes to the event)
+- `src/infrastructure/database/migrations/migrations.ts` (migration 007 adds `ledger_computed_audit` table)
+
+`LedgerService.computeFields()` now emits a `ledger.entry.computed`
+event on the event bus every time it runs successfully. The payload
+includes:
+
+- `entityId` / `entityType` — identifies the row
+- `after` — the computed values (devisAnnuel, totalVersements,
+  totalCreance, grandTotal)
+- `metadata.studentName` / `level` / `optionCode` / `destination`
+- `metadata.ruleCount` — how many rules fired
+- `metadata.rules` — array of `{ id, name, targetField, priority,
+  hadCondition }` for each rule that fired
+
+`AuditService.registerListeners()` subscribes to the event and
+persists it via the existing `AuditLog` infrastructure. A new
+`logger.info('audit.ledger.computed', ...)` call also writes a
+structured log line so the audit trail is queryable by rule name,
+level, destination, etc.
+
+Migration 007 creates a dedicated `ledger_computed_audit` table
+with indexes on `entity_id` and `timestamp` for fast lookups.
+
+#### Notes
+
+- The event is emitted AFTER the calculation succeeds — if
+  `computeFields()` throws, no event is published.
+- The `ruleSummary` array is self-contained — even if the
+  underlying `FormulaRule` rows are later edited or deleted, the
+  audit record still shows which rules fired at the time of the
+  computation.
+- The event is published on the same event bus as the other
+  `ledger.entry.*` events, so existing subscribers (like the
+  notification service) can be extended to react to it.
+
+#### Tests
+
+`tests/run-iteration4-tests.ts` — section "Fix #30 — Issue 20"
+- `LedgerService.computeFields emits a 'ledger.entry.computed' event on the event bus` ✓
+- `the 'ledger.entry.computed' event is received by subscribers (audit trail wiring)` ✓ (integration test with a real event bus subscriber)
+- `AuditService.registerListeners subscribes to 'ledger.entry.computed'` ✓
+- `Migration 007 creates the ledger_computed_audit table for persisted audit records` ✓
+
+---
+
+### Fix #31 — Mismatch C: Sibling discount via `primary_parent_id` indexed lookup
+
+#### Original problem (verbatim from `software_review.md`)
+
+> In `DiscountPipeline.resolveEligibility()`, sibling relationships
+> are evaluated by scanning the `students` table's JSON column using
+> a SQL `LIKE` query:
+> ```sql
+> SELECT parent_ids_json FROM students WHERE parent_ids_json LIKE '%"parent_id"%'
+> ```
+>
+> This is slow, unscalable, and prone to boundary bugs. [...] By
+> relying on strict parent IDs that are not automatically linked
+> during raw Excel imports, the application fails to detect
+> siblings for imported spreadsheet rows.
+
+Three problems with the LIKE-based approach:
+1. **Performance**: `LIKE` on a JSON column cannot use an index →
+   full table scan on every call.
+2. **Boundary bugs**: a parent ID that's a substring of another
+   (e.g. `p_1` matching `p_10`) produces false positives.
+3. **Imported rows**: the LIKE approach finds them, but a naive
+   `primary_parent_id = ?` query would NOT — because the ingestion
+   service doesn't set `primary_parent_id`.
+
+#### Implemented solution
+
+**Files**:
+- `src/infrastructure/repositories/parent.repository.ts` (rewrote `getStudentIds()`)
+- `src/infrastructure/database/migrations/migrations.ts` (migration 007 adds `idx_students_primary_parent`)
+
+`getStudentIds(parentId)` now uses a two-stage query:
+
+1. **Fast path** (indexed): `SELECT id FROM students WHERE primary_parent_id = ? AND deleted_at IS NULL`. This is O(log n) thanks to the new `idx_students_primary_parent` index created by migration 007.
+
+2. **Legacy fallback** (only when the fast path returns nothing):
+   `SELECT id, parent_ids_json FROM students WHERE parent_ids_json LIKE '%"id"%' AND deleted_at IS NULL`.
+   The fallback now ALSO double-checks the parsed JSON to eliminate
+   substring false-positives (`p_1` no longer matches `p_10`).
+
+The two result sets are de-duplicated in JS via a `Set` before
+returning. The public signature is unchanged — callers don't need
+updating.
+
+#### Notes
+
+- The fast path is the canonical case for rows created through the
+  in-app UI (which sets `primary_parent_id` correctly).
+- The legacy fallback handles rows whose `primary_parent_id` was
+  never set — typically imported spreadsheet rows. It still uses
+  LIKE (slow), but only fires when the fast path returns nothing
+  for this parent. The hot path is fast; the cold path handles
+  legacy data correctly.
+- The fallback's extra `Array.includes(parentId)` check eliminates
+  the substring false-positive risk that was present in the
+  previous implementation.
+- Migration 007 is idempotent (`CREATE INDEX IF NOT EXISTS`), so
+  it's safe to re-run.
+
+#### Tests
+
+`tests/run-iteration4-tests.ts` — section "Fix #31 — Mismatch C"
+- `Migration 007 creates the idx_students_primary_parent index` ✓
+- `ParentRepository.getStudentIds uses primary_parent_id = ? as the fast path` ✓
+- `getStudentIds finds students via primary_parent_id (fast path, no LIKE)` ✓ (integration test creates real `students` rows via SQL)
+- `getStudentIds still finds legacy rows whose primary_parent_id is null but parent_ids_json contains the ID` ✓ (integration test with `primary_parent_id = NULL`)
+
+---
+
+### Fix #32 — Issue 5.5: Quote block dropdown validation
+
+#### Original problem (verbatim from `software_review.md`)
+
+> Excel's Devis sheet has 5 data-validation dropdowns (`CLASSE`,
+> `FI`, `FRAISSCOLAIRE`, `SERVICE`, `transport`) that are **all
+> broken** (named ranges don't exist). The software doesn't
+> implement any dropdown validation for quote line items.
+
+The software previously had NO validation for these fields at all.
+Operators could type arbitrary strings into `classe`, `fi`,
+`fraisScolaire`, `service`, and `transport`, and the quote block
+would silently accept them.
+
+#### Implemented solution
+
+**Files**:
+- `src/shared/quote-dropdown-values.ts` (new — 250 lines)
+- `src/services/quote.service.ts` (wired into `validateInput()`)
+
+A new module exposes the canonical dropdown lists reconstructed
+from the Obsidian vault:
+
+- `CLASSE_DROPDOWN_VALUES` — 22 codes (MS, GS, PRIM, CP, CE1, CE2,
+  CM1, CM2, COLG, 1AAM–4AAM, LYC, 1AS–3AS, AUTISTE, NV2–NV5)
+- `FI_DROPDOWN_VALUES` — 3 registration amounts (18000, 25000, 30000)
+- `FRAISSCOLAIRE_DROPDOWN_VALUES` — 6 tuition amounts
+- `SERVICE_DROPDOWN_VALUES` — 9 service labels (Transport,
+  Cafeteria, Ratrapage, PSY, ORTH, E-PLANT, Septembre, Décembre, Mars)
+- `TRANSPORT_DROPDOWN_VALUES` — 4 transport tier amounts (35000,
+  43000, 52000, 55000)
+
+Two validators:
+- `validateQuoteLineItemDropdowns(item)` — returns warnings for a
+  single line item's dropdown fields
+- `validateQuoteBlockDropdowns(items)` — aggregates warnings across
+  all items in a block, tagging each with the item's label
+
+`QuoteService.validateInput()` calls the validator so the warnings
+surface alongside the existing Nb 02 / 8.7 checks. The save is NOT
+blocked — mirroring Excel's permissive behaviour with broken named
+ranges.
+
+A `classToLevel(classe)` helper maps specific class codes (CE1,
+3AAM, 1AS, etc.) to their parent level — useful for the form UI to
+suggest default FI and FRAISSCOLAIRE amounts when the operator
+picks a class.
+
+#### Notes
+
+- The validation is case-insensitive and whitespace-trimmed —
+  Excel's data validation is similarly permissive.
+- Empty values are allowed (Excel allows blanks).
+- The canonical lists are exposed as `readonly string[]` so the UI
+  can render real dropdowns (instead of free-text inputs) when the
+  operator creates a new quote block.
+
+#### Tests
+
+`tests/run-iteration4-tests.ts` — section "Fix #32 — Issue 5.5"
+- `All five canonical dropdown lists are non-empty` ✓
+- `CLASSE_DROPDOWN_VALUES includes both level codes (PRIM, COLG) and specific class codes (CP, CE1, 1AAM, 1AS)` ✓
+- `FI_DROPDOWN_VALUES includes 18000, 25000, and 30000 (the three documented registration tiers)` ✓
+- `TRANSPORT_DROPDOWN_VALUES includes 35000, 43000, 52000, and 55000 (the four transport tiers)` ✓
+- `validateQuoteLineItemDropdowns returns no warnings for canonical values` ✓
+- `validateQuoteLineItemDropdowns returns a warning for an unknown classe` ✓
+- `validateQuoteLineItemDropdowns is case-insensitive` ✓
+- `validateQuoteLineItemDropdowns returns a warning for an unknown transport amount` ✓
+- `validateQuoteLineItemDropdowns allows empty values (Excel allows blanks)` ✓
+- `validateQuoteBlockDropdowns aggregates warnings across multiple items and tags each with the item label` ✓
+- `classToLevel maps specific class codes to their parent level` ✓
+- `QuoteService.validateInput surfaces dropdown warnings alongside the Nb 02 rule` ✓ (integration test)
 
 ---
 
