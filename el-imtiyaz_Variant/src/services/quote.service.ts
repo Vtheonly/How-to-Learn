@@ -47,6 +47,7 @@ import {
 import { NotFoundError, ValidationError } from "../infrastructure/error/app-error";
 import { logger } from "../infrastructure/logger/logger";
 import { validateQuoteBlockDropdowns } from "../shared/quote-dropdown-values";
+import { computeLineTotal } from "../shared/quote-line-item-columns";
 
 /**
  * A soft validation warning. Excel's "Nb 02" rule on the Devis sheet
@@ -336,7 +337,16 @@ export class QuoteService {
       service: it.service,
       transport: it.transport,
       amounts: it.amounts,
-      lineTotal: it.amounts.reduce((s, a) => s + (Number(a) || 0), 0),
+      // ── Issue 5.1 (iteration 5 / Fix #42): type-aware lineTotal ──
+      //
+      // Excel's =SUM(A15:H15) ignores text columns (A, B, C, D, G)
+      // and sums only the numeric columns (E=FI, F=tuition, H=transport).
+      // The previous `amounts.reduce((s, a) => s + a, 0)` summed ALL
+      // 8 positions, which silently produced the wrong total when a
+      // caller placed a non-zero number in a text column. We now use
+      // the shared `computeLineTotal()` helper that mirrors Excel's
+      // behaviour exactly: only indices 4, 5, 7 contribute.
+      lineTotal: computeLineTotal(it.amounts),
     }));
 
     const subTotal = refreshedItems.reduce((s, it) => s + it.lineTotal, 0);

@@ -30,6 +30,10 @@ interface LedgerRow {
   class_code: string | null;
   option_code: string | null;
   remise: number;
+  // ── Iteration 5 (issue 1.5): omit_remise flag ──
+  omit_remise: number;
+  // ── Iteration 5 (issue 1.6): per-row custom formula override ──
+  custom_formula: string | null;
   justification: string | null;
   devis_annuel: number;
   total_versements: number;
@@ -135,7 +139,7 @@ export class LedgerRepository extends BaseRepository<LedgerEntry, LedgerQuery> {
       `INSERT INTO ledger_entries (
         id, student_id, academic_year_id, source_row,
         infos, email, phone_numbers, tutor_name, student_name, level, class_code, option_code,
-        remise, justification, devis_annuel, total_versements, total_creance,
+        remise, omit_remise, custom_formula, justification, devis_annuel, total_versements, total_creance,
         reimbursement, prior_debt, debt_settlement,
         fi, v2, alt_v2, v3, destination, t1, t2, t3,
         psy1, psy2, orth1, orth2, e_plant, ratrapage,
@@ -144,7 +148,7 @@ export class LedgerRepository extends BaseRepository<LedgerEntry, LedgerQuery> {
       ) VALUES (
         @id, @studentId, @academicYearId, @sourceRow,
         @infos, @email, @phoneNumbers, @tutorName, @studentName, @level, @classCode, @optionCode,
-        @remise, @justification, @devisAnnuel, @totalVersements, @totalCreance,
+        @remise, @omitRemise, @customFormula, @justification, @devisAnnuel, @totalVersements, @totalCreance,
         @reimbursement, @priorDebt, @debtSettlement,
         @fi, @v2, @altV2, @v3, @destination, @t1, @t2, @t3,
         @psy1, @psy2, @orth1, @orth2, @ePlant, @ratrapage,
@@ -165,6 +169,8 @@ export class LedgerRepository extends BaseRepository<LedgerEntry, LedgerQuery> {
         classCode: input.classCode ?? null,
         optionCode: input.optionCode ?? null,
         remise: input.remise ?? 0,
+        omitRemise: input.omitRemise ? 1 : 0,
+        customFormula: input.customFormula ?? null,
         justification: input.justification ?? null,
         devisAnnuel: input.devisAnnuel ?? 0,
         totalVersements: input.totalVersements ?? 0,
@@ -218,6 +224,8 @@ export class LedgerRepository extends BaseRepository<LedgerEntry, LedgerQuery> {
       classCode: "class_code",
       optionCode: "option_code",
       remise: "remise",
+      omitRemise: "omit_remise",
+      customFormula: "custom_formula",
       justification: "justification",
       devisAnnuel: "devis_annuel",
       totalVersements: "total_versements",
@@ -310,6 +318,8 @@ export class LedgerRepository extends BaseRepository<LedgerEntry, LedgerQuery> {
       classCode: row.class_code ?? undefined,
       optionCode: row.option_code ?? undefined,
       remise: row.remise,
+      omitRemise: row.omit_remise === 1,
+      customFormula: row.custom_formula ?? undefined,
       justification: row.justification ?? undefined,
       devisAnnuel: row.devis_annuel,
       totalVersements: row.total_versements,

@@ -1097,3 +1097,148 @@
   backdrop-filter: blur(2px);
   z-index: 3;
 }
+
+/* ── DataGrid (Fix #33) ─────────────────────────────────────── */
+/* Lightweight grid that mirrors Excel's row/column layout. Uses CSS
+ * grid for column alignment so each row is a grid container with the
+ * same `grid-template-columns` as the header row.
+ */
+.el-datagrid {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  border: 1px solid var(--border-default, #d1d5db);
+  border-radius: var(--radius-md, 6px);
+  overflow: hidden;
+  background: var(--bg-surface, #ffffff);
+  min-height: 200px;
+}
+
+.el-datagrid__header {
+  display: grid;
+  background: var(--bg-subtle, #f9fafb);
+  border-bottom: 1px solid var(--border-default, #d1d5db);
+  font-weight: 600;
+  font-size: var(--text-sm, 13px);
+  color: var(--color-text-secondary, #4b5563);
+  user-select: none;
+}
+
+.el-datagrid__body {
+  position: relative;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.el-datagrid__row {
+  display: grid;
+  border-bottom: 1px solid var(--border-subtle, #f3f4f6);
+  align-items: center;
+  min-height: 44px;
+  transition: background-color var(--duration-fast, 100ms) ease;
+}
+
+.el-datagrid__row:last-child {
+  border-bottom: none;
+}
+
+.el-datagrid__row--clickable {
+  cursor: pointer;
+}
+
+.el-datagrid__row--clickable:hover {
+  background: var(--bg-hover, #f3f4f6);
+}
+
+.el-datagrid__row--selected {
+  background: var(--bg-selected, #eff6ff);
+}
+
+.el-datagrid__cell {
+  padding: var(--space-2, 8px) var(--space-3, 12px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-sm, 13px);
+  color: var(--color-text-primary, #111827);
+}
+
+.el-datagrid__cell--header {
+  padding-top: var(--space-3, 12px);
+  padding-bottom: var(--space-3, 12px);
+  font-weight: 600;
+}
+
+.el-datagrid__cell--sortable {
+  cursor: pointer;
+}
+
+.el-datagrid__cell--sortable:hover {
+  background: var(--bg-hover-strong, #eef0f2);
+}
+
+.el-datagrid__cell--sorted {
+  color: var(--color-primary-blue, #2563eb);
+}
+
+.el-datagrid__cell--align-left   { text-align: left;   justify-content: flex-start; }
+.el-datagrid__cell--align-right  { text-align: right;  justify-content: flex-end;   }
+.el-datagrid__cell--align-center { text-align: center; justify-content: center;     }
+
+.el-datagrid__cell--checkbox {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-2, 8px);
+}
+
+.el-datagrid__cell--checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.el-datagrid__loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(1px);
+  z-index: 2;
+}
+
+.el-datagrid__empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-8, 32px) var(--space-4, 16px);
+  min-height: 200px;
+}
+
+/* ── Ledger row status colours (Fix #36, issue 7.4) ────────── */
+/* Mirrors Excel's green-to-white colour scale on the ETAT sheet.
+ * The class is applied to a row or cell; the background colour is
+ * the equivalent of Excel's conditional-formatting fill.
+ */
+.el-row-status--ok       { background-color: #B7E1CD !important; }
+.el-row-status--info     { background-color: #F0E68C !important; }
+.el-row-status--warning  { background-color: #FFD580 !important; }
+.el-row-status--critical { background-color: #FFB3B3 !important; }
+
+.el-row-status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: var(--text-xs, 11px);
+  font-weight: 600;
+  color: var(--color-text-primary, #111827);
+}
+.el-row-status-badge.el-row-status--ok       { background-color: #B7E1CD; }
+.el-row-status-badge.el-row-status--info     { background-color: #F0E68C; }
+.el-row-status-badge.el-row-status--warning  { background-color: #FFD580; }
+.el-row-status-badge.el-row-status--critical { background-color: #FFB3B3; }

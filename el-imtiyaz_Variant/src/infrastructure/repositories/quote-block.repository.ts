@@ -11,6 +11,8 @@ import type {
 } from "../../core/entities/quote-block.entity";
 import { Identifier } from "../../core/value-objects/identifier";
 import { BaseRepository } from "./base.repository";
+// ── Iteration 5 / Fix #42 (issue 5.1): type-aware lineTotal ──
+import { computeLineTotal } from "../../shared/quote-line-item-columns";
 
 interface QuoteBlockRow {
   id: string;
@@ -92,7 +94,7 @@ export class QuoteBlockRepository extends BaseRepository<QuoteBlock, QuoteBlockQ
       return {
         ...i,
         id: i.id ?? Identifier.generate<"QuoteBlock">().value,
-        lineTotal: i.amounts.reduce((s, a) => s + (Number(a) || 0), 0),
+        lineTotal: computeLineTotal(i.amounts),
       } as QuoteLineItem;
     });
 
@@ -148,7 +150,7 @@ export class QuoteBlockRepository extends BaseRepository<QuoteBlock, QuoteBlockQ
         return {
           ...i,
           id: i.id ?? Identifier.generate<"QuoteBlock">().value,
-          lineTotal: i.amounts.reduce((s, a) => s + (Number(a) || 0), 0),
+          lineTotal: computeLineTotal(i.amounts),
         } as QuoteLineItem;
       });
       sets.push("items_json = @items");

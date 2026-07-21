@@ -113,6 +113,59 @@ export interface LedgerEntry {
   // ── Discount / quote inputs (cols J–K) ──
   remise: number;              // discount amount in DZD
   justification?: string;
+  /**
+   * Whether the remise term is structurally subtracted from the devis.
+   *
+   * ── Iteration 5 / Fix #34 (issue 1.5) ────────────────────────────
+   * Excel's L column contains per-row hand-typed formulas. Some rows
+   * OMIT the `-J` subtraction entirely:
+   *
+   *     L5:  =25000+305000+52000           (no "-J5")
+   *     L6:  =25000+205000+35000+52000     (no "-J6")
+   *
+   * The previous software always subtracted `remise` in the fallback
+   * formula. When `remise = 0` the result was numerically identical,
+   * but the structural difference matters: if an operator later types
+   * a value into column J by mistake, the spreadsheet row would
+   * silently ignore it (because the formula has no `-J`), whereas the
+   * software would silently subtract it.
+   *
+   * We mirror the spreadsheet by adding an explicit `omitRemise`
+   * flag. When true, the fallback formula skips the `-remise` term
+   * entirely (matching rows like L5 and L6). When false (the default),
+   * the formula keeps the `-remise` term (matching rows like L2, L3,
+   * L4 that have `-J2`, `-J3`, `-J4`).
+   *
+   * The flag is also exposed in `ctx.fields` so user-defined formula
+   * rules can branch on it (e.g.
+   * `IF(omitRemise = 1, registration + tuition + transport,
+   * registration + tuition + transport - remise)`).
+   */
+  omitRemise?: boolean;
+
+  /**
+   * Per-row custom formula override for the DEVIS ANNUEL computation.
+   *
+   * ── Iteration 5 / Fix #35 (issue 1.6 / §2) ───────────────────────
+   * Excel's L column contains hand-typed formulas that vary per row:
+   *
+   *     L2:  =25000+205000+35000-J2
+   *     L3:  =25000+205000+35000+55000-J3     (dual transport)
+   *     L5:  =25000+305000+52000              (no -J)
+   *     L16: =30000+340000-J16                (no transport)
+   *
+   * The starter formula rule is global. To honour the per-row
+   * variation without forcing every operator to define a separate
+   * FormulaRule, the operator can type a custom expression directly
+   * into the row. When present, it overrides the global devisAnnuel
+   * rule for THIS row only — other rows continue to use the rule.
+   *
+   * The expression uses the same mini-language as FormulaRule
+   * (see services/formula/formula-engine.ts). Example:
+   *     "registration + baseTuition + transportBase + transportPremium - remise"
+   * which composes the dual-transport pattern (issue 1.4).
+   */
+  customFormula?: string;
 
   // ── Computed values (cols L, P, Q — reproduced from Excel formulas) ──
   devisAnnuel: number;         // = reg + tuition + transport + extras − remise
@@ -166,6 +219,16 @@ export interface CreateLedgerEntryInput {
   studentName: string;
   phoneNumbers?: string;
   remise?: number;
+  /**
+   * Whether the remise term is structurally subtracted from the devis.
+   * Issue 1.5 — see the LedgerEntry.omitRemise doc above.
+   */
+  omitRemise?: boolean;
+  /**
+   * Per-row custom formula override for DEVIS ANNUEL.
+   * Issue 1.6 / §2 — see LedgerEntry.customFormula doc above.
+   */
+  customFormula?: string;
   // All numeric columns are optional on input — defaults to 0.
   fi?: number;
   v2?: number;

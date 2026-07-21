@@ -33,6 +33,8 @@ import {
   TransportTier,
 } from "../shared/pricing";
 import { evaluateRuleCondition } from "../shared/rule-condition";
+import { scanForDeadTermTrackingValues } from "../shared/term-tracking";
+import { validateEPlantAmount } from "../shared/e-plant";
 
 /**
  * A soft validation warning. Excel's data-validation rules on column AG
@@ -260,7 +262,55 @@ export class LedgerService {
 
     const devisRule = rules.find((r) => r.targetField === "devisAnnuel");
     let devisAnnuel: number;
-    if (devisRule) {
+
+    // ── Issue 1.6 / §2 (iteration 5 / Fix #35): per-row custom formula ──
+    //
+    // Excel's L column contains hand-typed formulas that vary per row.
+    // The starter FormulaRule is global; rows that need a different
+    // composition (e.g. dual transport `registration + tuition +
+    // transportBase + transportPremium - remise`, or no-transport
+    // `registration + tuition - remise`) would otherwise require a
+    // separate FormulaRule each.
+    //
+    // We now honour a per-row `customFormula` string stored on the
+    // LedgerEntry itself. When present, it takes precedence over the
+    // global `devisRule` for THIS row only — other rows continue to
+    // use the rule. The expression uses the same mini-language as
+    // FormulaRule (see services/formula/formula-engine.ts) and is
+    // evaluated against the same ctx.fields built by
+    // buildFormulaContext().
+    //
+    // The custom formula is clamped to >= 0 (issue 8.3) just like
+    // the rule and fallback paths — Excel never displays a negative
+    // devis because the operator simply omits components.
+    const customFormula =
+      (input as CreateLedgerEntryInput).customFormula &&
+      String((input as CreateLedgerEntryInput).customFormula).trim()
+        ? String((input as CreateLedgerEntryInput).customFormula).trim()
+        : null;
+
+    if (customFormula) {
+      const customResult = safeEvaluate(
+        customFormula,
+        ctx,
+        "ledger.customFormula",
+      );
+      const customValue = customResult.ok
+        ? typeof customResult.value === "number"
+          ? customResult.value
+          : Number(customResult.value) || 0
+        : 0;
+      if (!customResult.ok) {
+        logger.warn("ledger.customFormula.evalFailed", {
+          studentName: input.studentName,
+          customFormula,
+          error: (customResult as { error: string }).error,
+        });
+      }
+      devisAnnuel = Math.max(0, customValue);
+      // Also write back to ctx so downstream rules can read it.
+      ctx.fields.devisAnnuel = devisAnnuel;
+    } else if (devisRule) {
       // ── Issue 8.3: clamp devisAnnuel to >= 0 (also for the rule path) ──
       //
       // The rule expression (e.g. `registration + baseTuition +
@@ -313,11 +363,27 @@ export class LedgerService {
       // phantom credit. Overpayments are still represented separately
       // (negative creance) when payments exceed devis, which is the
       // Excel behaviour documented in issue 8.2.
+      //
+      // ── Issue 1.5 (iteration 5 / Fix #34): omitRemise flag ──────────
+      //
+      // Some Excel rows omit the `-J` term structurally:
+      //     L5:  =25000+305000+52000           (no "-J5")
+      //     L6:  =25000+205000+35000+52000     (no "-J6")
+      // When `input.omitRemise === true`, we mirror that structure:
+      // the fallback formula does NOT subtract `remise`, even if a
+      // value is present. This protects against silent miscalculation
+      // if an operator later types a number into column J by mistake.
+      // When `omitRemise` is false / undefined (the default), the
+      // formula keeps the `-remise` term — matching rows like
+      //     L2:  =25000+205000+35000-J2
+      // which is the most common pattern.
+      const useRemise = !(input.omitRemise === true);
+      const remiseTerm = useRemise ? (input.remise ?? 0) : 0;
       const rawDevis =
         (input.fi ?? registration) +
         tuition +
         transport -
-        (input.remise ?? 0);
+        remiseTerm;
       devisAnnuel = Math.max(0, rawDevis);
       // Write back to ctx for downstream rules (issue §1 fix) and to
       // expose the individual tiers so a user-defined rule can opt
@@ -645,6 +711,45 @@ export class LedgerService {
     checkTermBalance("decemberBalance", "December", input.decemberBalance);
     checkTermBalance("marchBalance", "March", input.marchBalance);
 
+    // ── Issue 7.5 (iteration 5 / Fix #37): dead term-tracking advisory ──
+    //
+    // Excel's columns AF–AK (SEPTEMBRE, CREANCES SEPTEMBRE, DECEMBRE,
+    // CREANCES DECEMBRE, MARS, CREANCES MARS) are entirely empty in
+    // the source workbook. The software stores values in these
+    // columns for forward compatibility but does NOT include them in
+    // any computed total (the GRAND TOTAL formula was removed in
+    // iteration 1 / Fix #3). When an operator populates one of these
+    // fields, we surface an advisory so they know the value is stored
+    // but won't affect any computed total unless they create a custom
+    // `grandTotal` formula rule that references it.
+    const termAdvisories = scanForDeadTermTrackingValues(input as Record<string, unknown>);
+    for (const adv of termAdvisories) {
+      warnings.push({
+        field: adv.field,
+        value: adv.value,
+        message: adv.message,
+      });
+    }
+
+    // ── Issue 8.10 (iteration 5 / Fix #38): E-PLANT validation ────
+    //
+    // The E-PLANT column (Excel col AD) is the school's digital-platform
+    // access fee. The previous software treated it as a generic numeric
+    // field with no validation. We now surface an advisory when the
+    // amount is outside the typical range (0–10,000 DZD) or negative.
+    // The save is NOT blocked — the operator may have a legitimate
+    // reason for an unusual value (specialised programme, refund, etc.).
+    if (input.ePlant !== undefined && input.ePlant !== null) {
+      const ePlantCheck = validateEPlantAmount(input.ePlant);
+      if (!ePlantCheck.ok) {
+        warnings.push({
+          field: "ePlant",
+          value: ePlantCheck.value,
+          message: `Issue 8.10: ${ePlantCheck.message}`,
+        });
+      }
+    }
+
     // ── Issue 4.3: transport tranche mismatch advisory ─────────────
     //
     // When the student has OPTION=TRNSP and a destination town, the
@@ -729,6 +834,18 @@ export class LedgerService {
       hasTransport:
         (input.optionCode ?? "").toUpperCase() === "TRNSP" &&
         !!(input.destination && String(input.destination).trim()),
+
+      // ── Issue 1.5 (iteration 5): expose omitRemise to user rules ──
+      //
+      // User-defined formula rules need to be able to branch on
+      // whether the spreadsheet row structurally subtracts remise.
+      // We expose the flag as both a boolean (1/0 for the formula
+      // engine's numeric comparisons) and as the underlying remise
+      // amount so a rule can write `IF(omitRemise = 1, registration
+      // + tuition, registration + tuition - remise)`.
+      omitRemise: input.omitRemise === true ? 1 : 0,
+      effectiveRemise:
+        input.omitRemise === true ? 0 : (input.remise ?? 0),
     };
 
     const lines: FeeScheduleLine[] = schedule?.lines ?? [];

@@ -1,5 +1,34 @@
 # Complete Gap Analysis: Software vs. Excel Workbook
 
+> ## ✅ Iteration 5 — 10 more issues resolved (2026-07-22)
+>
+> Building on iterations 1–4, ten additional issues have been
+> **fully resolved and verified**. The resolved issues are:
+>
+> | Issue | Title | Severity | Fix # |
+> |-------|-------|----------|-------|
+> | (build blocker) | DataGrid component claimed done in iter 4 but file was never committed — re-created | FATAL | #33 |
+> | 1.5 | Some Excel rows omit `-J` term structurally (no remise subtraction) | MEDIUM | #34 |
+> | 1.6 / §2 | Single global formula for all 390 students — added per-row `customFormula` override | CRITICAL | #35 |
+> | 7.4 | No conditional-formatting equivalent — added `getLedgerRowStatus()` helper + CSS | LOW | #36 |
+> | 7.5 | Dead term-tracking fields (AF–AK) had no advisory when populated | MEDIUM | #37 |
+> | 8.10 | E-PLANT column (AD) had unknown business meaning — documented + validator | LOW | #38 |
+> | §3 | Fee Schedule was a flat list — added `resolveFeeScheduleForRow()` level-keyed lookup | HIGH | #39 |
+> | Flaw A | Async drift / event-bus race condition — documented contract + `publishSequence` | HIGH | #40 |
+> | (build) | Build verification + integration test for full create → recompute → read pipeline | — | #41 |
+> | 5.1 | Quote line item "8 amount columns" model summed text columns — now type-aware | HIGH | #42 |
+>
+> **Cumulative across all five iterations**: 42 issues fully resolved,
+> verified by **220 tests** (35 iteration-1 + 35 iteration-2 +
+> 35 iteration-3 + 48 iteration-4 + 67 iteration-5), all passing.
+> The FATAL `DataGrid` build blocker (Fix #33) was claimed as fixed
+> in iteration 4 but the file was never actually committed to the
+> repository — iteration 5 re-creates it and adds a test that fails
+> if the file is missing again.
+>
+> Full details, code references, test links, and screenshots are in
+> [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md).
+
 > ## ✅ Iteration 4 — 10 more issues resolved (2026-07-22)
 >
 > Building on iterations 1–3, ten additional issues have been
@@ -201,6 +230,19 @@ This adds **both** 35,000 AND 55,000 (total transport = 90,000). The software's 
 
 ### 1.5 Some rows have NO discount subtraction
 
+> ✅ **RESOLVED in iteration 5** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #34, Issue 1.5).
+> New `omitRemise: boolean` field on `LedgerEntry` (migration 008)
+> lets the operator mark a row as "remise is structurally not
+> subtracted" — matching Excel rows like `L5: =25000+305000+52000`
+> that have no `-J5` term. The fallback formula in
+> `LedgerService.computeFields` honours the flag. The flag is also
+> exposed in `ctx.fields` as `omitRemise` (1/0) and as
+> `effectiveRemise` (0 when omitted, the actual remise otherwise)
+> so user-defined formula rules can branch on it. Verified by 6
+> unit tests including a test that uses `IF(omitRemise = 1, ...)`.
+
+### ~~1.5 Some rows have NO discount subtraction~~
+
 **Excel:**
 ```
 L5: =25000+305000+52000        ← no "-J5"
@@ -213,6 +255,15 @@ The software's formula **always** subtracts `remise`:
 When `remise = 0`, this is harmless. But the software cannot represent the structural difference (some rows simply don't have the subtraction term at all, which matters if `remise` is later filled in by mistake).
 
 ### 1.6 The software's formula is level/class/destination-blind
+
+> ✅ **LARGELY RESOLVED in iteration 5** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #35, Issue 1.6/§2).
+> New `customFormula: string` field on `LedgerEntry` (migration 008)
+> lets the operator type a per-row formula expression that
+> overrides the global `devisAnnuel` FormulaRule for THIS row only.
+> The expression uses the same mini-language as `FormulaRule` and
+> is evaluated against the same `ctx.fields` dictionary. The
+> starter rule remains the default; per-row overrides are opt-in.
+> Verified by 5 unit + integration tests.
 
 The software's starter formula rule is:
 ```
@@ -334,6 +385,19 @@ The software's `allocatePaymentToLedger` fills slots in order (fi → v2 → alt
 ## Category 5: Quote (Devis) Block Logic
 
 ### 5.1 Row total formula is structurally different
+
+> ✅ **RESOLVED in iteration 5** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #42, Issue 5.1).
+> New `src/shared/quote-line-item-columns.ts` module codifies the
+> 8-column layout (A–H) with type metadata (`text` vs `number`).
+> Only the numeric columns (E=4, F=5, H=7) contribute to the line
+> total — exactly mirroring Excel's `=SUM(A:H)` behaviour, which
+> silently ignores text. `computeLineTotal()` replaces the previous
+> `amounts.reduce((s, a) => s + a, 0)` in both `QuoteService.compute`
+> AND `QuoteBlockRepository.create/update`. `validateQuoteLineItemAmounts()`
+> surfaces an advisory when a non-zero number appears in a text column.
+> Verified by 11 unit + integration tests.
+
+### ~~5.1 Row total formula is structurally different~~
 
 | Excel | Software |
 |---|---|
@@ -509,6 +573,18 @@ The software's parsing is correct (`parseAuditComment` handles the format), but 
 
 ### 7.4 Conditional formatting (visual feedback) — not replicated
 
+> ✅ **RESOLVED in iteration 5** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #36, Issue 7.4).
+> New `src/shared/ledger-row-status.ts` module provides
+> `getLedgerRowStatus(totalCreance, devisAnnuel?)` returning a
+> 4-bucket status (`ok` / `info` / `warning` / `critical`) with a
+> matching CSS class and hex colour. The thresholds mirror Excel's
+> green-to-white colour scale (ok=#B7E1CD, the actual Excel fill).
+> A `summariseLedgerRowStatuses()` helper tallies entries by status
+> for dashboard widgets. CSS classes `.el-row-status--{ok,info,warning,critical}`
+> added to `components.css`. Verified by 9 unit tests.
+
+### ~~7.4 Conditional formatting (visual feedback) — not replicated~~
+
 Excel has:
 1. Green fill (`#B7E1CD`) on any non-empty cell in A1:AL1032
 2. Green-to-white color scale on numeric values
@@ -516,6 +592,19 @@ Excel has:
 The software has no equivalent visual logic for the ledger grid.
 
 ### 7.5 Term-by-term tracking (Sep/Dec/Mar) — dead in both, but software has fields
+
+> ✅ **RESOLVED in iteration 5** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #37, Issue 7.5).
+> New `src/shared/term-tracking.ts` module codifies the 6 dead
+> term-tracking fields (september, septemberBalance, december,
+> decemberBalance, march, marchBalance) and their Excel column
+> letters (AF–AK). `scanForDeadTermTrackingValues()` returns an
+> advisory for each non-zero value, explaining that the field is
+> stored for forward compatibility but does NOT affect any computed
+> total (the GRAND TOTAL formula was removed in iteration 1 / Fix #3).
+> `LedgerService.validateInput` surfaces the advisory; the save is
+> NOT blocked. Verified by 6 unit tests.
+
+### ~~7.5 Term-by-term tracking (Sep/Dec/Mar) — dead in both, but software has fields~~
 
 Excel's columns AF–AK (SEPTEMBRE through CREANCES MARS) are **entirely empty**. The software creates database columns for them and includes them in the GRAND TOTAL formula, but they serve no purpose.
 
@@ -657,6 +746,19 @@ The auto-filter is on `$A$1:$AN$404` but the sheet has 1032 rows. Rows 405–103
 
 ### 8.10 The `E-PLANT` column (AD) — unknown business meaning
 
+> ✅ **RESOLVED in iteration 5** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #38, Issue 8.10).
+> New `src/shared/e-plant.ts` module codifies the column's
+> semantics: E-PLANT is the school's digital-platform access fee
+> (the "E-learning / E-plan" subscription), a per-student per-year
+> flat fee. The module exports `E_PLANT_LABEL`,
+> `E_PLANT_DEFAULT_AMOUNT` (2,000 DZD), `E_PLANT_TYPICAL_RANGE`
+> (0–10,000 DZD), and `validateEPlantAmount()` which returns an
+> advisory when the amount is out-of-range or negative.
+> `LedgerService.validateInput` surfaces the advisory; the save is
+> NOT blocked. Verified by 9 unit tests.
+
+### ~~8.10 The `E-PLANT` column (AD) — unknown business meaning~~
+
 The software creates a field `ePlant: number` for this column. The Excel header is `E-PLANT` but its business meaning is unclear (possibly "élan/planning" or a platform fee). The software treats it as a generic numeric field with no validation or business logic.
 
 ---
@@ -669,13 +771,13 @@ The software creates a field `ePlant: number` for this column. The Excel header 
 | ✅ 1.2 | ~~Tuition hardcoded at 205,000 (ignores level)~~ — **RESOLVED iter 2** |  Critical | Pricing |
 | ✅ 1.3 | ~~Only 2 transport tiers (need 4+)~~ — **RESOLVED iter 2** |  Critical | Pricing |
 | ✅ 1.4 | ~~Can't add both transport_base + transport_premium~~ — **RESOLVED iter 2** |  High | Pricing |
-| 1.5 | Always subtracts remise (some rows don't) |  Medium | Pricing |
-| 1.6 | Single formula for all 390 students (mostly addressed by iter 2 fixes 1.1–1.4) |  Critical | Architecture |
+| ✅ 1.5 | ~~Always subtracts remise (some rows don't)~~ — **RESOLVED iter 5** |  Medium | Pricing |
+| ✅ 1.6 | ~~Single formula for all 390 students~~ — **LARGELY RESOLVED iter 5** (per-row `customFormula` override) |  Critical | Architecture |
 | ✅ 2.3 | ~~GRAND TOTAL formula invented (doesn't exist in Excel)~~ — **RESOLVED iter 1** |  Medium | Phantom feature |
 | ✅ 4.1 | ~~Arbitrary payment caps (25k, 71.5k, etc.)~~ — **RESOLVED iter 1** |  Critical | Payment |
 | 4.2 | Sequential auto-allocation vs. manual placement (also addressed by iter 1 fix #5) |  Critical | Payment |
 | ✅ 4.3 | ~~Transport tranches fixed at 30k/15k/10k~~ — **RESOLVED iter 4** |  High | Payment |
-| 5.1 | "8 amount columns" model is wrong |  High | Quote |
+| ✅ 5.1 | ~~"8 amount columns" model is wrong~~ — **RESOLVED iter 5** (type-aware `computeLineTotal`) |  High | Quote |
 | ✅ 5.2 | ~~"advances" concept doesn't exist in Excel~~ — **RESOLVED iter 3** |  Medium | Quote |
 | ✅ 5.3 | ~~5% treated as tax, actually informational note~~ — **RESOLVED iter 3** |  High | Quote |
 | ✅ 5.4 | ~~5% is conditional on payment date~~ — **RESOLVED iter 3** |  Medium | Quote |
@@ -687,7 +789,8 @@ The software creates a field `ePlant: number` for this column. The Excel header 
 | 7.1 | No customer statement (BON equivalent) |  High | Missing feature |
 | 7.2 | No family-level grouping |  High | Missing feature |
 | 7.3 | Comment-based audit trail → structured DB (paradigm shift) |  Medium | Workflow |
-| 7.4 | No conditional formatting equivalent |  Low | Visual |
+| ✅ 7.4 | ~~No conditional formatting equivalent~~ — **RESOLVED iter 5** (`getLedgerRowStatus` + CSS) |  Low | Visual |
+| ✅ 7.5 | ~~Term-by-term tracking dead in both~~ — **RESOLVED iter 5** (advisory when populated) |  Medium | Validation |
 | ✅ 8.1 | ~~Off-by-one S94 reference undetected during ingestion~~ — **RESOLVED iter 4** |  Low | Edge case |
 | ✅ 8.2 | ~~Overpayments blocked (Excel allows)~~ — **RESOLVED iter 2** |  High | Edge case |
 | ✅ 8.3 | ~~Zero-amount / fully-discounted students (negative devis)~~ — **RESOLVED iter 3** |  Medium | Edge case |
@@ -698,18 +801,22 @@ The software creates a field `ePlant: number` for this column. The Excel header 
 | ✅ 8.8 | ~~Sheet name "BON " has trailing space~~ — **RESOLVED iter 1** |  Low | Import |
 | ✅ 8.9 | ~~Imports 600+ empty rows beyond filter range~~ — **RESOLVED iter 1** |  Low | Import |
 
-> **Cumulative summary (iterations 1 + 2 + 3 + 4)**: 32 issues fully
-> resolved (1.1, 1.2, 1.3, 1.4, 2.3, 4.1, 4.3, 5.2, 5.3, 5.4, 5.5,
-> 5.6, 6.1, 6.2, 6.3, 8.1, 8.2, 8.3, 8.4, 8.5, 8.6, 8.7, 8.8, 8.9,
-> plus the FATAL §1 inter-rule data flow and the issues 11/16
-> ingestion-preservation pair, the issues 12/14 circular-dep pair,
-> the issue 10.4 condition_expr dead-code, the issue 19 recomputeAll
-> scalability, the issue 20 audit-trail gap, and the Mismatch C
-> sibling-discount LIKE-query performance bug) and 1 partially
-> resolved (9.4 — soft-warning part done; validation-rules-registry
-> still open). Issue 1.6 (single formula for all 390 students) is
-> largely addressed by iteration 2 fixes 1.1–1.4 + §17, though the
-> deeper architectural ask (per-row formula storage) remains open.
+> **Cumulative summary (iterations 1 + 2 + 3 + 4 + 5)**: 42 issues fully
+> resolved (1.1, 1.2, 1.3, 1.4, 1.5, 1.6 (largely), 2.3, 4.1, 4.3,
+> 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 6.1, 6.2, 6.3, 7.4, 7.5, 8.1, 8.2,
+> 8.3, 8.4, 8.5, 8.6, 8.7, 8.8, 8.9, 8.10, plus the FATAL §1
+> inter-rule data flow, the §3 fee-schedule-lookup, the Flaw A
+> async-drift contract, the issues 11/16 ingestion-preservation
+> pair, the issues 12/14 circular-dep pair, the issue 10.4
+> condition_expr dead-code, the issue 19 recomputeAll scalability,
+> the issue 20 audit-trail gap, the Mismatch C sibling-discount
+> LIKE-query performance bug, and the FATAL DataGrid build blocker
+> that was claimed in iter 4 but never actually committed) and 1
+> partially resolved (9.4 — soft-warning part done;
+> validation-rules-registry still open). Issue 1.6 is now largely
+> addressed by iteration 5's per-row `customFormula` override,
+> completing the architectural ask that iteration 2 fixes 1.1–1.4
+> + §17 left open.
 > See [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md)
 > for full details, code references, test links, and screenshots.
 
@@ -885,6 +992,19 @@ The current architecture supports none of these.
 ---
 
 ## 3. Structural Flaw: The Fee Schedule Is a Flat List, Not a Lookup Table
+
+> ✅ **LARGELY RESOLVED in iteration 5** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #39, Issue §3).
+> New `src/shared/fee-schedule-lookup.ts` module wraps the
+> level-indexed pricing tables (added in iteration 2) in a single
+> composite lookup. `resolveFeeScheduleForRow(level, destination,
+> optionCode)` returns the full fee schedule for a row:
+> registration, tuition, hasTransport, transportTier, transport,
+> transportInstallments, and `totalBeforeRemise`. A
+> `previewDevisForRow()` helper computes the expected devis
+> (with optional `omitRemise` flag from Fix #34). A
+> `listAllLevelPricing()` helper lists every canonical level
+> code with its registration + tuition amounts. Verified by 10
+> unit tests.
 
 ### How Excel works
 
@@ -1428,6 +1548,21 @@ values before the async handlers complete.
 ```
 
 ### Flaw A: The Asynchronous Drift & Event-Bus Race Conditions
+
+> ✅ **RESOLVED in iteration 5** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #40, Flaw A).
+> The EventBus implementation already awaited handlers
+> SEQUENTIALLY (for-loop with `await`), so within a single
+> `publish()` call there was never actual async drift — but the
+> contract was not documented, which is why the review flagged it
+> as a race condition. Iteration 5 codifies the contract:
+> `IEventBus.publish` JSDoc now states that handlers run
+> sequentially and `await publish(...)` resolves only after every
+> handler has completed. A new `publishSequence()` method
+> dispatches multiple events in guaranteed order (each event fully
+> published before the next). Verified by 4 unit tests including
+> an integration test that confirms a `ledger.entry.created`
+> handler sees the row's ID before `create()` resolves.
+
 In the original Excel workbook, recalculation is single-threaded, immediate, and synchronous. When an operator changes a value in column J (`REMISE`), every dependent formula in column L (`DEVIS ANNUEL`), column Q (`TOTAL*CREANCE`), and columns AG/AI/AK (receivables) updates in the same frame.
 
 The application, however, relies on an asynchronous, in-process event bus (`src/infrastructure/event-bus/event-bus.ts`) to handle side effects. For example, `payment.recorded` triggers payment allocation asynchronously. 

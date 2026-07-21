@@ -627,5 +627,37 @@ export const migrations: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_ledger_computed_audit_timestamp
         ON ledger_computed_audit(timestamp);
     `
+  },
+  {
+    id: '008_iteration5_ledger_omit_remise',
+    description: 'Iteration 5 — Fix #34 (issue 1.5): omit_remise column on ledger_entries + custom_formula column (Fix #35, issue 1.6/§2)',
+    up: `
+      -- ── Issue 1.5: omit_remise flag ────────────────────────────────
+      --
+      -- Some Excel rows structurally omit the "-J" term:
+      --     L5:  =25000+305000+52000           (no "-J5")
+      --     L6:  =25000+205000+35000+52000     (no "-J6")
+      --
+      -- The new boolean column lets the operator mark a row as
+      -- "remise is structurally not subtracted" — matching the
+      -- spreadsheet's per-row formula composition. Default 0 (subtract)
+      -- so existing rows keep the previous behaviour.
+      ALTER TABLE ledger_entries ADD COLUMN omit_remise INTEGER NOT NULL DEFAULT 0;
+
+      -- ── Issue 1.6 / §2: per-row custom formula ────────────────────
+      --
+      -- The starter formula rule is global (one expression per
+      -- targetField). Excel's actual workflow lets the operator
+      -- hand-type a different formula per row. We add a nullable
+      -- custom_formula column: when present, it overrides the
+      -- global devisAnnuel rule for that row only.
+      --
+      -- The expression uses the same mini-language as FormulaRule
+      -- (see services/formula/formula-engine.ts). The formula is
+      -- evaluated against the same ctx.fields built by
+      -- buildFormulaContext(). Example stored value:
+      --     "registration + baseTuition + transportBase + transportPremium - remise"
+      ALTER TABLE ledger_entries ADD COLUMN custom_formula TEXT;
+    `
   }
 ];
