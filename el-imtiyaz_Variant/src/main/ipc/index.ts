@@ -122,7 +122,7 @@ export function registerIpcHandlers(deps: RegistryDependencies): void {
     notification: new NotificationService(repos.notifications),
     ledger: null as unknown as LedgerService,
     quote: new QuoteService(repos.quoteBlocks, eventBus),
-    feeSchedule: new FeeScheduleService(repos.feeSchedules),
+    feeSchedule: new FeeScheduleService(repos.feeSchedules, eventBus),
     formulaRule: new FormulaRuleService(repos.formulaRules),
     excelIngestion: null as unknown as ExcelIngestionService,
   };
@@ -134,7 +134,15 @@ export function registerIpcHandlers(deps: RegistryDependencies): void {
     repos.auditComments,
     eventBus,
   );
-  services.feeSchedule["ledger"] = services.ledger;
+  // ── Iteration 3 (issues 12 + 14): removed the late-injection hack ──
+  //
+  // The previous line was:
+  //     services.feeSchedule["ledger"] = services.ledger;
+  // which bypassed TypeScript's type system (the FeeScheduleService
+  // declared `ledger: LedgerService | null`) and created a hidden
+  // circular dependency. We now wire the eventBus into
+  // FeeScheduleService (above) and let LedgerService subscribe to the
+  // `feeSchedule.changed` event. No late injection required.
   services.excelIngestion = new ExcelIngestionService(
     repos.spreadsheetTemplates,
     repos.ledger,

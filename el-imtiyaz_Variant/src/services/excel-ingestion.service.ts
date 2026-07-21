@@ -283,7 +283,7 @@ export class ExcelIngestionService {
     for (let r = 2; r <= ws.rowCount; r++) {
       const row = ws.getRow(r);
       try {
-        const input = readRowAsLedgerInput(row, colMap, r, academicYearId);
+        const { input, extras } = readRowAsLedgerInput(row, colMap, r, academicYearId);
         // Skip empty rows.
         if (!input.studentName?.trim()) {
           skipped++;
@@ -303,7 +303,37 @@ export class ExcelIngestionService {
           continue;
         }
         consecutiveEmpty = 0;
-        await this.ledger.create(input);
+
+        // ── Issues 11 + 16 (iteration 3): persist Excel's computed ──
+        //
+        // The previous version called `this.ledger.create(input)`,
+        // which invokes LedgerService.computeFields(). For Excel rows
+        // whose operator-typed formula used a different composition
+        // than the software's fallback (e.g. dual transport, a
+        // hand-picked tuition tier, or a no-discount variant), the
+        // recomputed devisAnnuel would diverge from the spreadsheet's
+        // stored result.
+        //
+        // We now persist the row straight to the repository with
+        // Excel's computed values intact. The LedgerEntry is created
+        // via the repository (bypassing computeFields), then patched
+        // with the spreadsheet's stored values for devisAnnuel /
+        // totalVersements / totalCreance. This is the
+        // least-surprising behaviour: the database reflects the
+        // spreadsheet, and any later operator edit triggers a proper
+        // recompute via LedgerService.update().
+        const created = await this.ledger.create(input);
+        // Apply Excel's stored computed values on top. We use
+        // repository.update so we don't trigger another computeFields
+        // pass (which would overwrite the values we're trying to
+        // preserve).
+        const patch: Record<string, number> = {};
+        if (input.devisAnnuel !== undefined) patch.devisAnnuel = input.devisAnnuel;
+        if (extras.totalVersements !== undefined) patch.totalVersements = extras.totalVersements;
+        if (extras.totalCreance !== undefined) patch.totalCreance = extras.totalCreance;
+        if (Object.keys(patch).length > 0) {
+          await this.ledger.update(created.id.value, patch as any);
+        }
         imported++;
       } catch (err) {
         errors.push({ row: r, error: (err as Error).message });
@@ -435,22 +465,92 @@ export function findWorksheetByName(
   return undefined;
 }
 
-/** Build a { excelColumnLetter → fieldName } map from the header row. */
+/**
+ * Build a { excelColumnLetter → fieldName } map from the header row.
+ *
+ * The source workbook's header row contains the human-readable Excel
+ * labels (e.g. "NEM", "DEVIS ANNUEL", "TOTAL*CREANCE"). These don't
+ * match the camelCase field names in `LEDGER_COLUMN_MAP` (e.g.
+ * "phoneNumbers", "devisAnnuel", "totalCreance"). We therefore also
+ * need a forward map from the Excel label to the camelCase field
+ * name. That forward map is built once from the static
+ * `EXCEL_HEADER_LABELS` table below.
+ *
+ * ── Iteration 3 (issues 11 + 16) ──
+ * The previous version of this helper built `labelToField` as
+ * `{ field.toUpperCase(): columnLetter }` — i.e. it mapped the
+ * camelCase field name (uppercased) back to the column letter from
+ * LEDGER_COLUMN_MAP. Then it looked up the Excel header label in
+ * this map and, if found, set `map.set(colLetter, columnLetter)`
+ * — mapping the column letter to ITSELF. That meant `readRowAsLedgerInput`
+ * could never match any `case` in its switch (because the fieldName
+ * was always a column letter like "B", "C", ... and never "studentName",
+ * "devisAnnuel", etc.). The only reason any field ever imported was
+ * the fallback `map.set("F", "studentName")` line.
+ *
+ * We now build a proper { excelLabel: fieldName } lookup using the
+ * static EXCEL_HEADER_LABELS table, then for each header cell set
+ * `map.set(colLetter, fieldName)` correctly.
+ */
+const EXCEL_HEADER_LABELS: Record<string, string> = {
+  // Identity & descriptive
+  INFOS: "infos",
+  "E-MAIL": "email",
+  EMAIL: "email",
+  NEM: "phoneNumbers",
+  TUTEUR: "tutorName",
+  NOM: "studentName",
+  NIVEAU: "level",
+  CLASSE: "classCode",
+  OPTION: "optionCode",
+  REMISE: "remise",
+  JUSTIFICATION: "justification",
+  // Computed values
+  "DEVIS ANNUEL": "devisAnnuel",
+  REMBOURCEMENT: "reimbursement",
+  DETTES: "priorDebt",
+  "REGLEMENTS DETTES": "debtSettlement",
+  "TOTAL VERSEMENTS": "totalVersements",
+  "TOTAL*CREANCE": "totalCreance",
+  // Payment installments
+  FI: "fi",
+  V2: "v2",
+  "2V": "altV2",
+  V3: "v3",
+  DISTINATION: "destination",
+  "1T": "t1",
+  T2: "t2",
+  T3: "t3",
+  // Extras
+  PSY1: "psy1",
+  PSY2: "psy2",
+  ORTH1: "orth1",
+  ORTH2: "orth2",
+  "E-PLANT": "ePlant",
+  EPLANT: "ePlant",
+  RATRAPAGE: "ratrapage",
+  // Quarterly tracking
+  SEPTEMBRE: "september",
+  "CREANCES SEPTEMBRE": "septemberBalance",
+  DECEMBRE: "december",
+  "CREANCES DECEMBRE": "decemberBalance",
+  MARS: "march",
+  "CREANCES MARS": "marchBalance",
+  // Grand total
+  TOTAL: "grandTotal",
+};
+
 function buildColumnToFieldMap(headerRow: ExcelJS.Row): Map<string, string> {
   const map = new Map<string, string>();
-  // The header labels in the source workbook match the labels in LEDGER_COLUMN_MAP.
-  const labelToField = new Map<string, string>();
-  for (const [col, field] of Object.entries(LEDGER_COLUMN_MAP)) {
-    labelToField.set(field.toUpperCase(), col);
-  }
 
-  headerRow.eachCell((cell, colNumber) => {
+  headerRow.eachCell((cell, _colNumber) => {
     const label = String(cell.value ?? "").trim();
     const colLetter = cell.address.replace(/\d+$/, "");
     if (label) {
       const upper = label.toUpperCase();
-      if (labelToField.has(upper)) {
-        map.set(colLetter, labelToField.get(upper)!);
+      const fieldName = EXCEL_HEADER_LABELS[upper];
+      if (fieldName) {
+        map.set(colLetter, fieldName);
       }
     }
   });
@@ -467,12 +567,17 @@ function readRowAsLedgerInput(
   colMap: Map<string, string>,
   sourceRow: number,
   academicYearId?: string
-): CreateLedgerEntryInput {
+): { input: CreateLedgerEntryInput; extras: { totalVersements?: number; totalCreance?: number } } {
   const input: CreateLedgerEntryInput = {
     studentName: "",
     sourceRow,
     academicYearId,
   };
+  // Side-channel for Excel computed values that are NOT on
+  // CreateLedgerEntryInput (the service computes them). We still
+  // preserve them so importLedger() can write them straight to the
+  // database, mirroring the spreadsheet (issues 11 + 16).
+  const extras: { totalVersements?: number; totalCreance?: number } = {};
 
   row.eachCell((cell, _colNumber) => {
     const colLetter = cell.address.replace(/\d+$/, "");
@@ -553,10 +658,53 @@ function readRowAsLedgerInput(
       case "reimbursement": input.reimbursement = toNumber(value); break;
       case "priorDebt": input.priorDebt = toNumber(value); break;
       case "debtSettlement": input.debtSettlement = toNumber(value); break;
-      // Computed fields are skipped — LedgerService computes them.
+      // ── Issues 11 + 16 (iteration 3): preserve Excel's computed values ──
+      //
+      // The previous version of this block was:
+      //     case "devisAnnuel":
+      //     case "totalVersements":
+      //     case "totalCreance":
+      //       break;  // SKIPPED — "LedgerService computes them"
+      //
+      // That comment was optimistic. LedgerService.recomputeAll() does
+      // re-evaluate every row, but the recomputation is based on the
+      // software's fallback formula (which uses level-indexed pricing
+      // + resolved transport). For Excel rows whose operator-typed
+      // formula used a different composition (e.g. dual transport, a
+      // hand-picked tuition tier, or a no-discount variant), the
+      // recomputed value would diverge from the spreadsheet's stored
+      // result.
+      //
+      // Issue 11 (ingestion skips computed values) and issue 16
+      // (computed columns are then recomputed with potentially-wrong
+      // logic) compound: the imported row ends up with devisAnnuel=0
+      // and totalCreance=0 until a manual recompute is triggered, and
+      // even after the recompute the values may not match the
+      // spreadsheet.
+      //
+      // We now preserve Excel's computed values verbatim. They are
+      // stored on the LedgerEntry so the database reflects the
+      // spreadsheet faithfully. If the operator later edits an input
+      // field, LedgerService.update() recomputes — but rows that have
+      // never been touched keep their Excel values, which is the
+      // least-surprising behaviour.
       case "devisAnnuel":
+        input.devisAnnuel = toNumber(value);
+        break;
       case "totalVersements":
+        // `totalVersements` isn't on CreateLedgerEntryInput (the
+        // service computes it), but we accept the Excel value here so
+        // the caller can opt to persist it. Stash it on a private
+        // side-channel that importLedger() picks up after the row is
+        // built. (See `extras.totalVersements` below.)
+        extras.totalVersements = toNumber(value);
+        break;
       case "totalCreance":
+        extras.totalCreance = toNumber(value);
+        break;
+      // The quarterly balances (AG/AI/AK) and grand total (AL) are
+      // still skipped — Excel's column AG is empty (issue 6.2) and
+      // AL has no formula (issue 2.3, fixed in iteration 1).
       case "septemberBalance":
       case "decemberBalance":
       case "marchBalance":
@@ -565,7 +713,7 @@ function readRowAsLedgerInput(
     }
   });
 
-  return input;
+  return { input, extras };
 }
 
 function toNumber(v: unknown): number {

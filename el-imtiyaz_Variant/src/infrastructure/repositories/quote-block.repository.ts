@@ -21,10 +21,16 @@ interface QuoteBlockRow {
   items_json: string;
   advances: number;
   discounts: number;
+  // Iteration 3 (issue 5.2 / 5.3-5.4): the new columns are nullable on
+  // legacy rows that pre-date migration 006. mapRow() coerces null/undefined
+  // to the documented defaults (0 for remboursement, undefined for
+  // payment_date) so the in-memory entity is always well-formed.
+  remboursement: number | null;
   sub_total: number;
   net_payable: number;
   school_fee_tax: number;
   block_date: string;
+  payment_date: string | null;
   template_id: string | null;
   created_at: string;
   updated_at: string;
@@ -93,12 +99,12 @@ export class QuoteBlockRepository extends BaseRepository<QuoteBlock, QuoteBlockQ
     this.db.run(
       `INSERT INTO quote_blocks (
         id, name, description, student_id, academic_year_id, items_json,
-        advances, discounts, sub_total, net_payable, school_fee_tax,
-        block_date, template_id, created_at, updated_at
+        advances, discounts, remboursement, sub_total, net_payable, school_fee_tax,
+        block_date, payment_date, template_id, created_at, updated_at
       ) VALUES (
         @id, @name, @description, @studentId, @academicYearId, @items,
-        @advances, @discounts, @subTotal, @netPayable, @schoolFeeTax,
-        @blockDate, @templateId, @createdAt, @updatedAt
+        @advances, @discounts, @remboursement, @subTotal, @netPayable, @schoolFeeTax,
+        @blockDate, @paymentDate, @templateId, @createdAt, @updatedAt
       )`,
       {
         id,
@@ -109,10 +115,16 @@ export class QuoteBlockRepository extends BaseRepository<QuoteBlock, QuoteBlockQ
         items: JSON.stringify(items),
         advances: input.advances ?? 0,
         discounts: input.discounts ?? 0,
-        subTotal: 0,
-        netPayable: 0,
-        schoolFeeTax: 0,
+        remboursement: input.remboursement ?? 0,
+        // Iteration 3 — honour the computed values passed in by the
+        // service. The previous version hardcoded these to 0, which
+        // meant the service's compute() output was silently dropped
+        // on insert. (affects issues 5.2, 5.3/5.4, 5.6, 8.7)
+        subTotal: input.subTotal ?? 0,
+        netPayable: input.netPayable ?? 0,
+        schoolFeeTax: input.schoolFeeTax ?? 0,
         blockDate: input.blockDate ?? now,
+        paymentDate: input.paymentDate ?? null,
         templateId: input.templateId ?? null,
         createdAt: now,
         updatedAt: now,
@@ -144,10 +156,12 @@ export class QuoteBlockRepository extends BaseRepository<QuoteBlock, QuoteBlockQ
     }
     if (patch.advances !== undefined) { sets.push("advances = @advances"); params.advances = patch.advances; }
     if (patch.discounts !== undefined) { sets.push("discounts = @discounts"); params.discounts = patch.discounts; }
+    if (patch.remboursement !== undefined) { sets.push("remboursement = @remboursement"); params.remboursement = patch.remboursement; }
     if (patch.subTotal !== undefined) { sets.push("sub_total = @subTotal"); params.subTotal = patch.subTotal; }
     if (patch.netPayable !== undefined) { sets.push("net_payable = @netPayable"); params.netPayable = patch.netPayable; }
     if (patch.schoolFeeTax !== undefined) { sets.push("school_fee_tax = @schoolFeeTax"); params.schoolFeeTax = patch.schoolFeeTax; }
     if (patch.blockDate !== undefined) { sets.push("block_date = @blockDate"); params.blockDate = patch.blockDate; }
+    if (patch.paymentDate !== undefined) { sets.push("payment_date = @paymentDate"); params.paymentDate = patch.paymentDate; }
     if (patch.templateId !== undefined) { sets.push("template_id = @templateId"); params.templateId = patch.templateId; }
 
     this.db.run(`UPDATE quote_blocks SET ${sets.join(", ")} WHERE id = @id`, params);
@@ -173,10 +187,14 @@ export class QuoteBlockRepository extends BaseRepository<QuoteBlock, QuoteBlockQ
       items,
       advances: row.advances,
       discounts: row.discounts,
+      // Iteration 3 — issue 5.2: remboursement may be null on legacy rows.
+      remboursement: row.remboursement ?? 0,
       subTotal: row.sub_total || subTotal,
       netPayable: row.net_payable,
       schoolFeeTax: row.school_fee_tax,
       blockDate: row.block_date,
+      // Iteration 3 — issues 5.3/5.4: payment_date drives the early-bonus.
+      paymentDate: row.payment_date ?? undefined,
       templateId: row.template_id ?? undefined,
       createdAt: row.created_at,
       updatedAt: row.updated_at,

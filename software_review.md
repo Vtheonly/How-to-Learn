@@ -1,5 +1,27 @@
 # Complete Gap Analysis: Software vs. Excel Workbook
 
+> ## ✅ Iteration 3 — 7 more issues resolved (2026-07-21)
+>
+> Building on iterations 1 and 2, seven additional issues have been
+> **fully resolved and verified**. The resolved issues are:
+>
+> | Issue | Title | Severity | Fix # |
+> |-------|-------|----------|-------|
+> | 8.3 | Zero-amount / fully-discounted students (negative devis) | MEDIUM | #16 |
+> | 5.2 | "advances" concept doesn't exist in Excel — replaced with `remboursement` | MEDIUM | #17 |
+> | 5.3 / 5.4 / 9.2 | 5% treated as unconditional tax, actually conditional early-payment bonus | HIGH | #18 |
+> | 5.6 | Quote block "Nb 02" confirmation rule not enforced | MEDIUM | #19 |
+> | 11 / 16 | Ingestion skips computed values; recomputed values diverge from Excel | MEDIUM | #20 |
+> | 12 / 14 | Circular dependency hack (`feeSchedule["ledger"] = ledger`) | MEDIUM | #21 |
+> | 8.7 | Duplicate devis numbers in Devis sheet (no detection) | LOW | #22 |
+>
+> Full details, code references, test links, and screenshots are in
+> [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md).
+>
+> **Cumulative across all three iterations**: 22 issues fully resolved
+> + 1 partially resolved, verified by **111 tests** (35 iteration-1 +
+> 35 iteration-2 + 6 integration + 35 iteration-3), all passing.
+
 > ## ✅ Iteration 2 — 8 more critical / high-severity issues resolved (2026-07-21)
 >
 > Building on iteration 1, eight additional issues have been **fully
@@ -277,6 +299,17 @@ The software's model of "8 amount columns" is wrong. Excel's columns A (name), B
 
 ### 5.2 "advances" concept doesn't exist in Excel
 
+> ✅ **RESOLVED in iteration 3** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #17, Issue 5.2).
+> A new `remboursement` column was added to `quote_blocks` (migration
+> 006). `QuoteService.compute()` now returns `netPayable = max(0,
+> subTotal - discounts - remboursement)`, matching Excel's two formula
+> patterns: `=I27 - I29` (no remboursement) and `=I27 - I29 - I30`
+> (with remboursement). The legacy `advances` field is kept for
+> backward compat but no longer used in the formula. Verified by 4
+> unit tests.
+
+### ~~5.2 "advances" concept doesn't exist in Excel~~
+
 **Software:**
 ```
 netPayable = subTotal - advances - discounts
@@ -292,11 +325,29 @@ Excel has no "advances" field. The software invented this. Excel's deduction is 
 
 ### 5.3 The 5% "tax" is informational only, not a computed field
 
+> ✅ **RESOLVED in iteration 3** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #18, Issues 5.3/5.4/9.2).
+> A new `payment_date` column was added to `quote_blocks` (migration
+> 006). `QuoteService.compute()` now evaluates
+> `qualifiesForEarlyPaymentBonus(paymentDate)` against a year-agnostic
+> cutoff of `${year}-06-30`. When the condition is not met (or
+> `paymentDate` is missing), `schoolFeeTax` is persisted as 0. The
+> field is no longer an unconditional "tax" — it's a conditional
+> early-payment bonus, exactly as Excel's D35 note describes. Verified
+> by 7 unit tests.
+
+### ~~5.3 The 5% "tax" is informational only, not a computed field~~
+
 **Software** treats `schoolFeeTax = SUM(fraisScolaire) * 0.05` as a **computed field on the quote block entity**, stored in the database.
 
 **Excel reality:** The 5% calculation appears in cell D35 as part of a **text note**: "Nb 01: une remise de 5% sois [amount] est rajoutée si le paiement est effectué en totalité avant le 30 juin 2021". It's a **conditional early-payment discount** shown for information, NOT a tax added to the total. The `Montant Total DZD` cell (I31) does NOT include or reference this 5% figure.
 
 ### 5.4 The 5% discount is conditional on payment date
+
+> ✅ **RESOLVED in iteration 3** (same fix as 5.3) — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #18, Issues 5.3/5.4/9.2).
+> The bonus is now only computed when `paymentDate <= ${year}-06-30`.
+> When the condition is not met, `schoolFeeTax = 0`.
+
+### ~~5.4 The 5% discount is conditional on payment date~~
 
 Excel's note says the 5% applies **only if paid in full before June 30**. The software computes it unconditionally as a static field.
 
@@ -305,6 +356,17 @@ Excel's note says the 5% applies **only if paid in full before June 30**. The so
 Excel's Devis sheet has 5 data-validation dropdowns (`CLASSE`, `FI`, `FRAISSCOLAIRE`, `SERVICE`, `transport`) that are **all broken** (named ranges don't exist). The software doesn't implement any dropdown validation for quote line items.
 
 ### 5.6 Quote block "Nb 02" confirmation rule is not enforced
+
+> ✅ **RESOLVED in iteration 3** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #19, Issue 5.6).
+> `QuoteService.validateInput()` now returns a "Nb 02" warning when
+> neither the FI column (index 4) nor the fraisScolaire column
+> (index 5) of any line item carries a non-zero amount. The save is
+> NOT blocked — Excel's rule is informational, and an operator may
+> legitimately create a draft quote before the confirmation payment
+> is recorded. `isQuoteConfirmed()` is exported for testing.
+> Verified by 4 unit tests.
+
+### ~~5.6 Quote block "Nb 02" confirmation rule is not enforced~~
 
 Excel states: "Toute inscription doit etre confirmée par un versement (frais d'inscription + 1er tranche)". This is a business rule requiring a minimum initial payment. The software has no equivalent enforcement.
 
@@ -425,6 +487,15 @@ This **blocks overpayments**, which Excel allows. The software does have an `OVE
 
 ### 8.3 Zero-amount students (fully discounted)
 
+> ✅ **RESOLVED in iteration 3** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #16, Issue 8.3).
+> `computeFields()` now clamps `devisAnnuel` to `>= 0` on BOTH the
+> rule-evaluation path AND the fallback path. A fully-discounted
+> student (e.g. MS with 200k remise on a 143k base) gets `devis = 0`
+> instead of `-57k`. Overpayments still produce negative `creance`
+> (issue 8.2 preserved). Verified by 4 unit tests.
+
+### ~~8.3 Zero-amount students (fully discounted)~~
+
 Some Excel rows have devis = 0 or very low amounts (e.g., special needs students with heavy discounts). The software's formula `registration + baseTuition + transportBase - remise` could produce a negative devis if remise > sum of components. Excel's hand-typed formulas avoid this by construction.
 
 ### 8.4 Students with no transport but OPTION field populated
@@ -465,6 +536,15 @@ Excel stores phone numbers as `0663701834/0660800317` (slash-separated). The sof
 Excel uses `NV2`, `NV3`, `NV4`, `NV5` as level codes for special/new students. The software's `StudentStatus` enum has `ACTIVE, SUSPENDED, GRADUATED, LEFT, PENDING` — no equivalent for these codes. They'd be imported as raw strings in the `level` field with no validation.
 
 ### 8.7 Duplicate devis numbers in Devis sheet
+
+> ✅ **RESOLVED in iteration 3** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #22, Issue 8.7).
+> `QuoteService.checkDuplicateName()` scans existing non-deleted
+> quote blocks and returns an advisory warning when a block with the
+> same name already exists. The save is NOT blocked — Excel allows
+> duplicates (they may be intentional re-quotes) — but the operator
+> gets clear feedback to verify. Verified by 4 unit tests.
+
+### ~~8.7 Duplicate devis numbers in Devis sheet~~
 
 Excel's Devis sheet has duplicate devis numbers (two blocks share `0103/2021/2022`, two share `0104/2021/2022`, two share `0107/2021/2022`). The software's quote block entity has no uniqueness constraint on name/number, so this is technically allowed but could cause confusion.
 
@@ -514,10 +594,10 @@ The software creates a field `ePlant: number` for this column. The Excel header 
 | 4.2 | Sequential auto-allocation vs. manual placement (also addressed by iter 1 fix #5) |  Critical | Payment |
 | 4.3 | Transport tranches fixed at 30k/15k/10k |  High | Payment |
 | 5.1 | "8 amount columns" model is wrong |  High | Quote |
-| 5.2 | "advances" concept doesn't exist in Excel |  Medium | Quote |
-| 5.3 | 5% treated as tax, actually informational note |  High | Quote |
-| 5.4 | 5% is conditional on payment date |  Medium | Quote |
-| 5.6 | Confirmation rule not enforced |  Medium | Quote |
+| ✅ 5.2 | ~~"advances" concept doesn't exist in Excel~~ — **RESOLVED iter 3** |  Medium | Quote |
+| ✅ 5.3 | ~~5% treated as tax, actually informational note~~ — **RESOLVED iter 3** |  High | Quote |
+| ✅ 5.4 | ~~5% is conditional on payment date~~ — **RESOLVED iter 3** |  Medium | Quote |
+| ✅ 5.6 | ~~Confirmation rule not enforced~~ — **RESOLVED iter 3** |  Medium | Quote |
 | ✅ 6.1 | ~~Hard validation vs. Excel's soft validation~~ — **RESOLVED iter 1** |  High | Validation |
 | ✅ 6.2 | ~~Validates an empty column~~ — **RESOLVED iter 1** |  Medium | Validation |
 | 7.1 | No customer statement (BON equivalent) |  High | Missing feature |
@@ -525,15 +605,19 @@ The software creates a field `ePlant: number` for this column. The Excel header 
 | 7.3 | Comment-based audit trail → structured DB (paradigm shift) |  Medium | Workflow |
 | 7.4 | No conditional formatting equivalent |  Low | Visual |
 | ✅ 8.2 | ~~Overpayments blocked (Excel allows)~~ — **RESOLVED iter 2** |  High | Edge case |
+| ✅ 8.3 | ~~Zero-amount / fully-discounted students (negative devis)~~ — **RESOLVED iter 3** |  Medium | Edge case |
 | ✅ 8.4 | ~~TRNSP option adds transport even when Excel didn't~~ — **RESOLVED iter 2** |  High | Edge case |
 | ✅ 8.5 | ~~Phone-number type mismatch~~ — **RESOLVED iter 1** |  Low | Type safety |
 | ✅ 8.6 | ~~NV2–NV5 level codes not recognised~~ — **RESOLVED iter 1** |  Low | Validation |
+| ✅ 8.7 | ~~Duplicate devis numbers in Devis sheet (no detection)~~ — **RESOLVED iter 3** |  Low | Quote |
 | ✅ 8.8 | ~~Sheet name "BON " has trailing space~~ — **RESOLVED iter 1** |  Low | Import |
 | ✅ 8.9 | ~~Imports 600+ empty rows beyond filter range~~ — **RESOLVED iter 1** |  Low | Import |
 
-> **Cumulative summary (iterations 1 + 2)**: 15 issues fully resolved
-> (1.1, 1.2, 1.3, 1.4, 2.3, 4.1, 6.1, 6.2, 8.2, 8.4, 8.5, 8.6, 8.8, 8.9,
-> plus the FATAL §1 inter-rule data flow) and 1 partially resolved (9.4 —
+> **Cumulative summary (iterations 1 + 2 + 3)**: 22 issues fully
+> resolved (1.1, 1.2, 1.3, 1.4, 2.3, 4.1, 5.2, 5.3, 5.4, 5.6, 6.1, 6.2,
+> 8.2, 8.3, 8.4, 8.5, 8.6, 8.7, 8.8, 8.9, plus the FATAL §1 inter-rule
+> data flow and the issues 11/16 ingestion-preservation pair, and the
+> issues 12/14 circular-dep pair) and 1 partially resolved (9.4 —
 > soft-warning part done; validation-rules-registry still open). Issue
 > 1.6 (single formula for all 390 students) is largely addressed by
 > iteration 2 fixes 1.1–1.4 + §17, though the deeper architectural ask
@@ -1014,6 +1098,26 @@ No service ever reads this field. It is never evaluated. It is never used to fil
 
 ## 11. The Excel Ingestion Service Breaks the Formula Chain
 
+> ✅ **RESOLVED in iteration 3** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #20, Issues 11/16).
+> `readRowAsLedgerInput()` now reads Excel's stored values for
+> `devisAnnuel`, `totalVersements`, and `totalCreance` (via a
+> side-channel `extras` object). `importLedger()` calls
+> `repo.create()` then `repo.update()` with those values, bypassing
+> `computeFields()` so the database faithfully mirrors the
+> spreadsheet for untouched rows. Operator edits still trigger a
+> proper recompute via `LedgerService.update()`.
+>
+> **Additional fix discovered while implementing #20**: the
+> `buildColumnToFieldMap()` helper was fundamentally broken — it
+> mapped column letters to THEMSELVES instead of to field names, so
+> no field except `studentName` (the hardcoded fallback) ever
+> imported. A new static `EXCEL_HEADER_LABELS` table maps 30+ Excel
+> labels ("DEVIS ANNUEL", "TOTAL VERSEMENTS", "TOTAL*CREANCE",
+> "2V", "1T", "T2", "t3", "E-PLANT", etc.) to camelCase field names.
+> Verified by 1 integration test that round-trips a real .xlsx file.
+
+## ~~11. The Excel Ingestion Service Breaks the Formula Chain~~
+
 ### What happens during import
 
 The `readRowAsLedgerInput` function reads cell **values**, not formulas:
@@ -1040,6 +1144,18 @@ It does neither.
 ---
 
 ## 12. The Circular Dependency Hack
+
+> ✅ **RESOLVED in iteration 3** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #21, Issues 12/14).
+> `FeeScheduleService` now accepts an `EventBus` in its constructor.
+> `update()` publishes a `feeSchedule.changed` event when pricing
+> changes. `LedgerService` subscribes to that event in its
+> constructor and calls its own `recomputeAll()` in response. The
+> late-injection back-channel (`services.feeSchedule["ledger"] =
+> services.ledger`) has been removed from `src/main/ipc/index.ts`.
+> The legacy `ledger` field on `FeeScheduleService` is kept
+> (deprecated) for backward compat. Verified by 4 unit tests.
+
+## ~~12. The Circular Dependency Hack~~
 
 In `ipc/index.ts`:
 
@@ -1155,9 +1271,9 @@ FamilyService.getStatement(tutorName) → {
 | 11 | **Missing: pricing lookup** |  HIGH | No level→fee or destination→transport mapping service. **(Largely addressed by iter 2 fixes #9, #10, #11 — `shared/pricing.ts` now provides both lookups.)** |
 | 12 | **Missing: formula composition** |  HIGH | No service that builds per-row formula from row attributes. **(Partly addressed by iter 2 fix #15 — formulas can now branch on level/optionCode/destination.)** |
 | 13 | **condition_expr dead code** |  MEDIUM | Field exists on entity, never read by any service. |
-| 14 | **Circular dependency hack** |  MEDIUM | `services.feeSchedule["ledger"] = services.ledger` bypasses DI. |
+| ✅ 14 | ~~**Circular dependency hack**~~ | ~~MEDIUM~~ | ~~`services.feeSchedule["ledger"] = services.ledger` bypasses DI.~~ **RESOLVED iter 3 — see [all_that_is_solved_so_far.md](./all_that_is_solved_so_far.md) Fix #21.** |
 | ✅ 15 | ~~**Soft vs hard validation**~~ | ~~MEDIUM~~ | ~~Excel's septemberBalance validation is soft. Software throws exception.~~ **RESOLVED iter 1 — see [all_that_is_solved_so_far.md](./all_that_is_solved_so_far.md) Fix #4.** |
-| 16 | **Ingestion skips computed values** |  MEDIUM | Import reads inputs, skips computed columns, then recomputes incorrectly. |
+| ✅ 16 | ~~**Ingestion skips computed values**~~ | ~~MEDIUM~~ | ~~Import reads inputs, skips computed columns, then recomputes incorrectly.~~ **RESOLVED iter 3 — see [all_that_is_solved_so_far.md](./all_that_is_solved_so_far.md) Fix #20.** |
 | ✅ 17 | ~~**Context missing metadata**~~ | ~~MEDIUM~~ | ~~optionCode, level, classCode, destination not in formula context.~~ **RESOLVED iter 2 — see [all_that_is_solved_so_far.md](./all_that_is_solved_so_far.md) Fix #15.** |
 | 18 | **No ranges in context** |  MEDIUM | VLOOKUP support exists in engine but ranges never populated. |
 | 19 | **Scalability** |  MEDIUM | recomputeAll() loads all 10,000 entries into memory, evaluates sequentially. |

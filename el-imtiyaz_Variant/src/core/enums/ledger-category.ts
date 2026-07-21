@@ -36,3 +36,22 @@ export const SEPTEMBER_BALANCE_MAX = 10000;
 
 /** Tax rate applied to school fees in the Devis sheet (D35 = SUM(F) * 0.05). */
 export const QUOTE_SCHOOL_FEE_TAX_RATE = 0.05;
+
+/**
+ * Early-payment cutoff date for the 5% bonus (issues 5.3 / 5.4).
+ *
+ * Excel's D35 note says:
+ *   "Nb 01: une remise de 5% sois [amount] est rajoutée si le paiement
+ *    est effectué en totalité avant le 30 juin 2021"
+ *
+ * The year is intentionally omitted — the cutoff is "30 June" of the
+ * academic year. The QuoteService compares the block's `paymentDate`
+ * (an ISO date string) against `YYYY-06-30` where `YYYY` is the year
+ * portion of the `paymentDate` itself. This makes the rule
+ * year-agnostic and reusable across academic years.
+ *
+ * When `paymentDate` is missing, null, or after the cutoff, the
+ * schoolFeeTax field is persisted as 0 (the bonus does NOT apply).
+ */
+export const QUOTE_EARLY_PAYMENT_CUTOFF_MONTH = 6;  // June (1-indexed)
+export const QUOTE_EARLY_PAYMENT_CUTOFF_DAY = 30;

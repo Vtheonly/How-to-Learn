@@ -49,18 +49,58 @@ export interface QuoteBlock {
   academicYearId?: string;
   /** The line items in this block (typically 10). */
   items: QuoteLineItem[];
-  /** Advances already paid (Excel I29 etc.) — subtracted from subtotal. */
+  /**
+   * Advances already paid (Excel I29 etc.).
+   *
+   * ── Issue 5.2 (iteration 3) ──
+   * Excel does NOT have an "advances" field — this column was an
+   * invention. The Excel grand-total formula is:
+   *     I31: =I27 - I29                (subtotal − réduction)
+   *     I31: =I27 - I29 - I30          (subtotal − réduction − remboursement)
+   * where I29 is the family discount ("Réduction") and I30 is the
+   * "Remboursement" credit. The software previously lumped both into
+   * `advances + discounts`.
+   *
+   * We now keep `advances` for backward compatibility but it is no
+   * longer used in `netPayable`. Use `discounts` for the "Réduction"
+   * (I29) and `remboursement` for the credit (I30).
+   */
   advances: number;
-  /** Discounts applied (Excel I30 etc.) — subtracted from subtotal. */
+  /** Discounts applied (Excel I29 — "Réduction"). */
   discounts: number;
+  /**
+   * Refunds/credits applied (Excel I30 — "Remboursement").
+   *
+   * Added in iteration 3 (issue 5.2). When > 0, netPayable subtracts
+   * this from the subtotal in addition to `discounts`, mirroring the
+   * Excel formula `=I27 - I29 - I30`.
+   */
+  remboursement: number;
   /** Computed sub-total (Excel I27). */
   subTotal: number;
-  /** Computed net payable (Excel I31 = I27 − I29). */
+  /** Computed net payable (Excel I31). */
   netPayable: number;
-  /** Computed 5% tax on school fees (Excel D35 = SUM(F15:F26) * 0.05). */
+  /**
+   * 5% early-payment bonus on school fees (Excel D35 = SUM(F15:F26) * 0.05).
+   *
+   * ── Issues 5.3 / 5.4 (iteration 3) ──
+   * Excel's D35 is an *informational* note about a conditional bonus:
+   * "5% remise si le paiement est effectué en totalité avant le 30
+   * juin". The previous software persisted this unconditionally as a
+   * "tax". We now compute it only when `paymentDate` is on or before
+   * the cutoff (30 June of the payment year). When the condition is
+   * not met, the field is persisted as 0.
+   */
   schoolFeeTax: number;
   /** Block date (Excel I9 = TODAY()). */
   blockDate: string;
+  /**
+   * Optional payment date used to evaluate the 5% early-payment bonus
+   * (issues 5.3 / 5.4). ISO date string (`YYYY-MM-DD`) or null when
+   * the payment has not yet been made. When null/missing, the
+   * schoolFeeTax is 0.
+   */
+  paymentDate?: string | null;
   /** Optional template this block was generated from. */
   templateId?: string;
   createdAt: string;
@@ -76,8 +116,12 @@ export interface CreateQuoteBlockInput {
   items?: Array<Omit<QuoteLineItem, "id" | "lineTotal">>;
   advances?: number;
   discounts?: number;
+  /** Refunds/credits applied (Excel I30 — "Remboursement"). Issue 5.2. */
+  remboursement?: number;
   templateId?: string;
   blockDate?: string;
+  /** Payment date for early-payment bonus evaluation. Issues 5.3/5.4. */
+  paymentDate?: string | null;
 }
 
 export type UpdateQuoteBlockInput = Partial<CreateQuoteBlockInput>;

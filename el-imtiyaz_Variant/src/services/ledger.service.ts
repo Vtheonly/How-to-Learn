@@ -79,6 +79,32 @@ export class LedgerService {
         );
       }
     });
+
+    // ── Iteration 3 (issues 12 + 14): event-driven recomputation ──
+    //
+    // When the FeeSchedule changes, every LedgerEntry that uses it
+    // must be re-evaluated. The previous version achieved this via a
+    // late-injection back-channel:
+    //     services.feeSchedule["ledger"] = services.ledger;
+    // which bypassed TypeScript's type system and created a hidden
+    // circular dependency. We now subscribe to the `feeSchedule.changed`
+    // event published by FeeScheduleService.update() and call our own
+    // recomputeAll() in response. This is the proper DI pattern — no
+    // late injection, no private-property assignment, no circular
+    // reference.
+    this.eventBus.subscribe("feeSchedule.changed", async (_event) => {
+      logger.info("ledger.recompute.triggered", {
+        source: "feeSchedule.changed",
+      });
+      try {
+        await this.recomputeAll();
+      } catch (err) {
+        logger.error("ledger.recompute.failed", {
+          source: "feeSchedule.changed",
+          error: (err as Error).message,
+        });
+      }
+    });
   }
 
   async list(query: LedgerQuery = {}): Promise<LedgerEntry[]> {
@@ -202,7 +228,14 @@ export class LedgerService {
     const devisRule = rules.find((r) => r.targetField === "devisAnnuel");
     let devisAnnuel: number;
     if (devisRule) {
-      devisAnnuel = this.evalNumeric(devisRule, ctx);
+      // ── Issue 8.3: clamp devisAnnuel to >= 0 (also for the rule path) ──
+      //
+      // The rule expression (e.g. `registration + baseTuition +
+      // resolvedTransport - remise`) can produce a negative value when
+      // `remise` exceeds the sum of components. Excel never displays a
+      // negative devis — the operator simply omits components — so we
+      // clamp the rule's output at 0 too, not just the fallback path.
+      devisAnnuel = Math.max(0, this.evalNumeric(devisRule, ctx));
     } else {
       // Fallback formula — Excel-equivalent per-row composition.
       //
@@ -231,11 +264,28 @@ export class LedgerService {
       const transport = (hasTransportOption && hasDestination)
         ? resolveTransportAmount(input.destination)
         : 0;
-      devisAnnuel =
+      // ── Issue 8.3: clamp devisAnnuel to >= 0 ─────────────────────────
+      //
+      // Excel rows hand-typed by the operator never produce a negative
+      // DEVIS ANNUEL — the operator simply omits components (e.g. a
+      // fully-discounted student gets `=0` or a token positive number).
+      // The software's composable fallback, however, can go negative when
+      // `remise` exceeds the sum of components (e.g. registration=18k +
+      // tuition=125k + transport=0 − remise=200k = -57k for a heavily
+      // subsidised pre-school student).
+      //
+      // We clamp at 0 to match the spreadsheet's effective range. The
+      // outstanding balance (TOTAL CREANCE) is still computed correctly
+      // — a student with devis=0 and payments=0 has creance=0, not a
+      // phantom credit. Overpayments are still represented separately
+      // (negative creance) when payments exceed devis, which is the
+      // Excel behaviour documented in issue 8.2.
+      const rawDevis =
         (input.fi ?? registration) +
         tuition +
         transport -
         (input.remise ?? 0);
+      devisAnnuel = Math.max(0, rawDevis);
       // Write back to ctx for downstream rules (issue §1 fix) and to
       // expose the individual tiers so a user-defined rule can opt
       // into the dual-transport pattern (issue 1.4).

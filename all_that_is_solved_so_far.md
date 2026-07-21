@@ -18,9 +18,537 @@ For each issue, we record:
 |-----------|------|-----------------|-------|--------|
 | 1 | 2026-07-21 | 7 fully + 1 partially | 35 unit + 6 integration | ✅ Complete |
 | 2 | 2026-07-21 | 8 (critical / high) | 35 new + 41 regression | ✅ Complete |
-| **Total** | | **15 fully + 1 partially** | **76 tests, all passing** | |
+| 3 | 2026-07-21 | 7 (medium / high / low) | 35 new + 76 regression | ✅ Complete |
+| **Total** | | **22 fully + 1 partially** | **111 tests, all passing** | |
 
 ---
+
+## Iteration 3 — 7 medium / high / low-severity issues resolved
+
+**Date**: 2026-07-21
+**Repository**: `github.com/Vtheonly/AgentGithubUplaod`
+**App code**: `el-imtiyaz_Variant/`
+**Verification**: 35 new unit/integration tests + 76 iteration-1/2/integration regression tests — all passing (111 total).
+**Screenshots**: `el-imtiyaz_Variant/screenshots/iteration3-verification.png` and `iteration3-tests-output.png`
+
+| # | Issue ID | Title | Severity |
+|---|----------|-------|----------|
+| 16 | 8.3 | Zero-amount / fully-discounted students (negative devis) | MEDIUM |
+| 17 | 5.2 | "advances" concept doesn't exist in Excel — replaced with `remboursement` | MEDIUM |
+| 18 | 5.3 / 5.4 / 9.2 | 5% treated as unconditional tax, actually conditional early-payment bonus | HIGH |
+| 19 | 5.6 | Quote block "Nb 02" confirmation rule not enforced | MEDIUM |
+| 20 | 11 / 16 | Ingestion skips computed values; recomputed values diverge from Excel | MEDIUM |
+| 21 | 12 / 14 | Circular dependency hack (`feeSchedule["ledger"] = ledger`) | MEDIUM |
+| 22 | 8.7 | Duplicate devis numbers in Devis sheet (no detection) | LOW |
+
+---
+
+### Fix #16 — Issue 8.3: Clamp `devisAnnuel` to >= 0
+
+#### Original problem (verbatim from `software_review.md`)
+
+> Some Excel rows have devis = 0 or very low amounts (e.g., special
+> needs students with heavy discounts). The software's formula
+> `registration + baseTuition + transportBase - remise` could produce
+> a negative devis if remise > sum of components. Excel's hand-typed
+> formulas avoid this by construction.
+
+#### Implemented solution
+
+`LedgerService.computeFields()` now clamps `devisAnnuel` to `>= 0` on
+**both** the rule-evaluation path AND the fallback path.
+
+**File**: `src/services/ledger.service.ts`
+
+```typescript
+const devisRule = rules.find((r) => r.targetField === "devisAnnuel");
+let devisAnnuel: number;
+if (devisRule) {
+  // Issue 8.3: clamp devisAnnuel to >= 0 (also for the rule path)
+  devisAnnuel = Math.max(0, this.evalNumeric(devisRule, ctx));
+} else {
+  // ... fallback formula ...
+  const rawDevis = (input.fi ?? registration) + tuition + transport - (input.remise ?? 0);
+  devisAnnuel = Math.max(0, rawDevis);
+}
+```
+
+#### Notes
+
+- The clamp is applied to BOTH paths because the seeded rule
+  `registration + baseTuition + resolvedTransport - remise` can also
+  go negative when `remise` is large.
+- Overpayments (issue 8.2, fixed in iteration 2) are still
+  represented as negative `totalCreance` — e.g. a student with
+  `devis=0` and `payments=30k` has `creance=-30k`. The clamp only
+  affects `devisAnnuel`, not `totalCreance`.
+- Excel's operator-typed formulas never produce a negative devis by
+  construction (the operator simply omits components). Our composable
+  fallback can, so the clamp is the defensive equivalent.
+
+#### Tests
+
+`tests/run-iteration3-tests.ts` — section "Fix #16 — Issue 8.3"
+- `computeFields() clamps devisAnnuel to 0 when remise exceeds the sum of components` ✓
+- `computeFields() returns a positive devisAnnuel when remise is small (no regression)` ✓
+- `computeFields() still computes totalCreance correctly when devis is clamped to 0` ✓
+- `computeFields() with overpayment + clamped devis still allows negative creance (issue 8.2 preserved)` ✓
+
+#### Screenshot
+
+See `el-imtiyaz_Variant/screenshots/iteration3-verification.png` — Panel 1.
+
+---
+
+### Fix #17 — Issue 5.2: `QuoteBlock.remboursement` + Excel `netPayable` formula
+
+#### Original problem (verbatim)
+
+> **Software:**
+> ```
+> netPayable = subTotal - advances - discounts
+> ```
+> **Excel:**
+> ```
+> =I27-I29        (subtotal - réduction)
+> =I27-I29-I30    (subtotal - réduction - remboursement, in some blocks)
+> ```
+> Excel has no "advances" field. The software invented this. Excel's
+> deduction is either "Réduction" or "Réduction + Remboursement".
+
+#### Implemented solution
+
+1. **New `remboursement` column** on `quote_blocks` (migration 006).
+
+2. **Updated `QuoteBlock` entity** with `remboursement: number` and
+   `CreateQuoteBlockInput.remboursement?: number`.
+
+3. **`QuoteService.compute()` signature changed**:
+   ```typescript
+   compute(items, discounts, remboursement, paymentDate): QuoteComputationResult
+   ```
+   Returns `netPayable = max(0, subTotal - discounts - remboursement)`.
+
+4. **Repository fixed**: `QuoteBlockRepository.create()` now honours
+   the computed `subTotal` / `netPayable` / `schoolFeeTax` values
+   passed in by the service. The previous version hardcoded these to
+   0, silently dropping the service's compute() output on insert.
+
+5. **Legacy `advances` field kept** for backward compat but no longer
+   used in the `netPayable` formula.
+
+**Files**:
+- `src/infrastructure/database/migrations/migrations.ts` (migration `006_iteration3_quote_block_columns`)
+- `src/core/entities/quote-block.entity.ts`
+- `src/infrastructure/repositories/quote-block.repository.ts`
+- `src/services/quote.service.ts`
+
+#### Notes
+
+- The two Excel formula patterns (`=I27-I29` and `=I27-I29-I30`) are
+  now both reproducible: when `remboursement = 0`, the second term
+  vanishes and the result equals the first formula.
+- `netPayable` is clamped at `max(0, ...)` — Excel never displays a
+  negative grand total because the operator wouldn't type a
+  `remboursement` larger than the subtotal, but the software is
+  defensive.
+- The `QuoteBlockRepository.update()` was also extended to honour
+  `remboursement` and `paymentDate` patches.
+
+#### Tests
+
+`tests/run-iteration3-tests.ts` — section "Fix #17 — Issue 5.2"
+- `QuoteBlock entity has a remboursement field (issue 5.2)` ✓
+- `compute() returns netPayable = subTotal - discounts (no remboursement case, Excel I27-I29)` ✓
+- `compute() returns netPayable = subTotal - discounts - remboursement (Excel I27-I29-I30)` ✓
+- `compute() does NOT subtract the legacy 'advances' field (issue 5.2 regression guard)` ✓
+- `create() persists remboursement and recomputes netPayable correctly` ✓
+
+#### Screenshot
+
+See `el-imtiyaz_Variant/screenshots/iteration3-verification.png` — Panel 2.
+
+---
+
+### Fix #18 — Issues 5.3 / 5.4 / 9.2: Conditional `schoolFeeTax`
+
+#### Original problem (verbatim)
+
+> **5.3**: The software treats `schoolFeeTax = SUM(fraisScolaire) * 0.05`
+> as a **computed field on the quote block entity**, stored in the
+> database. Excel reality: the 5% calculation appears in cell D35 as
+> part of a **text note**: "Nb 01: une remise de 5% sois [amount] est
+> rajoutée si le paiement est effectué en totalité avant le 30 juin
+> 2021". It's a **conditional early-payment discount** shown for
+> information, NOT a tax added to the total.
+>
+> **5.4**: Excel's note says the 5% applies **only if paid in full
+> before June 30**. The software computes it unconditionally as a
+> static field.
+>
+> **9.2** (architectural): the `schoolFeeTax` is computed and
+> persisted as a field on `QuoteBlock`. In Excel, it is a
+> **display-only note** conditional on payment date. It should be a
+> computed display value in the UI layer, not a persisted field in
+> the domain entity.
+
+#### Implemented solution
+
+1. **New `payment_date` column** on `quote_blocks` (migration 006,
+   same migration as Fix #17).
+
+2. **New constants** in `src/core/enums/ledger-category.ts`:
+   ```typescript
+   export const QUOTE_EARLY_PAYMENT_CUTOFF_MONTH = 6;  // June (1-indexed)
+   export const QUOTE_EARLY_PAYMENT_CUTOFF_DAY = 30;
+   ```
+
+3. **New exported helper** `qualifiesForEarlyPaymentBonus(paymentDate)`:
+   - Returns `true` when `paymentDate` (ISO date string) is on or
+     before `${year}-06-30` (year-agnostic — uses the year of the
+     payment date itself).
+   - Returns `false` for missing / malformed / late dates.
+
+4. **`QuoteService.compute()` now conditional**:
+   ```typescript
+   let schoolFeeTax = 0;
+   if (qualifiesForEarlyPaymentBonus(paymentDate)) {
+     const schoolFeeSum = refreshedItems.reduce((s, it) => s + (Number(it.amounts[5]) || 0), 0);
+     schoolFeeTax = schoolFeeSum * QUOTE_SCHOOL_FEE_TAX_RATE;
+   }
+   ```
+
+5. **Repository updated** to persist `payment_date` and honour it on
+   `create()` / `update()` / `mapRow()`.
+
+**Files**:
+- `src/core/enums/ledger-category.ts` (new constants)
+- `src/core/entities/quote-block.entity.ts` (`paymentDate` field)
+- `src/infrastructure/repositories/quote-block.repository.ts`
+- `src/services/quote.service.ts` (`qualifiesForEarlyPaymentBonus` + `compute()`)
+
+#### Notes
+
+- The year-agnostic cutoff makes the rule reusable across academic
+  years — the operator just enters the actual payment date and the
+  rule figures out whether it qualifies.
+- The field is still persisted (for backward compat with the DB
+  schema and for audit), but it is now correctly 0 in the common
+  case where the payment hasn't been made yet or was made late. A
+  future iteration could move it to a computed UI property and drop
+  the column entirely — that would be a more invasive change
+  requiring a UI rework, so we kept the persistence layer.
+- The `9.2` architectural ask (display-only, not persisted) is
+  addressed at the *semantic* level: the field is no longer an
+  unconditional "tax" — it's a conditional bonus that defaults to 0.
+  The deeper ask (drop the column entirely) is left for a future
+  iteration.
+
+#### Tests
+
+`tests/run-iteration3-tests.ts` — section "Fix #18 — Issues 5.3/5.4/9.2"
+- `QUOTE_EARLY_PAYMENT_CUTOFF_MONTH and DAY are 6 and 30 (June 30)` ✓
+- `qualifiesForEarlyPaymentBonus returns true for a date on or before 30 June` ✓
+- `qualifiesForEarlyPaymentBonus returns false for a date after 30 June` ✓
+- `qualifiesForEarlyPaymentBonus returns false for missing / malformed dates` ✓
+- `compute() returns schoolFeeTax=0 when paymentDate is missing (no early bonus)` ✓
+- `compute() returns schoolFeeTax=0 when paymentDate is after 30 June` ✓
+- `compute() returns schoolFeeTax = SUM(fraisScolaire) * 0.05 when paymentDate <= 30 June` ✓
+- `create() persists schoolFeeTax=0 when paymentDate is missing (issues 5.3/5.4)` ✓
+- `create() persists schoolFeeTax>0 when paymentDate qualifies for early bonus` ✓
+
+#### Screenshot
+
+See `el-imtiyaz_Variant/screenshots/iteration3-verification.png` — Panel 3.
+
+---
+
+### Fix #19 — Issue 5.6: "Nb 02" confirmation rule (soft warning)
+
+#### Original problem (verbatim)
+
+> Excel states: "Toute inscription doit etre confirmée par un
+> versement (frais d'inscription + 1er tranche)." This is a business
+> rule requiring a minimum initial payment. The software has no
+> equivalent enforcement.
+
+#### Implemented solution
+
+1. **New exported helper** `isQuoteConfirmed(items)`:
+   - Returns `true` when at least one line item has a non-zero amount
+     in the FI column (index 4) OR the fraisScolaire column (index 5).
+   - Permissive heuristic — avoids false negatives when the operator
+     splits the confirmation payment across multiple children in the
+     same block.
+
+2. **`QuoteService.validateInput()`** now returns a `Nb 02` warning
+   (a `QuoteValidationWarning[]` array, mirroring the
+   `ValidationWarning[]` pattern from iteration 1's Fix #4) when no
+   line item carries a confirmation payment.
+
+3. **`QuoteService.create()` and `update()`** call `validateInput()`
+   and log the warnings via `logger.warn("quote.block.validationWarnings", ...)`.
+   The save is NOT blocked — Excel's rule is informational.
+
+**File**: `src/services/quote.service.ts`
+
+#### Notes
+
+- The "soft warning" pattern is consistent with iteration 1's Fix #4
+  (September balance) and iteration 2's Fix #13 (overpayments). The
+  codebase now has a uniform approach to Excel's advisory rules.
+- An operator may legitimately create a draft quote before the
+  confirmation payment is recorded — blocking the save would break
+  that workflow.
+- The `isQuoteConfirmed()` helper is exported so the UI can render a
+  visual indicator (e.g. a yellow "Unconfirmed" badge) without
+  duplicating the heuristic.
+
+#### Tests
+
+`tests/run-iteration3-tests.ts` — section "Fix #19 — Issue 5.6"
+- `isQuoteConfirmed returns false when no line item has FI or fraisScolaire` ✓
+- `isQuoteConfirmed returns true when at least one line item has FI > 0` ✓
+- `isQuoteConfirmed returns true when at least one line item has fraisScolaire > 0` ✓
+- `isQuoteConfirmed returns false for empty items array` ✓
+- `create() returns a quote even when Nb 02 confirmation is missing (soft warning, save proceeds)` ✓
+- `validateInput() returns a Nb 02 warning when no FI / fraisScolaire is present` ✓
+- `validateInput() returns no Nb 02 warning when FI is present` ✓
+
+#### Screenshot
+
+See `el-imtiyaz_Variant/screenshots/iteration3-verification.png` — Panel 4.
+
+---
+
+### Fix #20 — Issues 11 / 16: Excel ingestion preserves computed values
+
+#### Original problem (verbatim)
+
+> **11**: The `readRowAsLedgerInput` function reads cell **values**,
+> not formulas. The imported `LedgerEntry` has `devisAnnuel = 0`,
+> `totalVersements = 0`, `totalCreance = 0`. The `LedgerService` is
+> expected to recompute them. But the recomputation produces
+> `totalCreance = 0` due to the broken context flow [iteration 2
+> fixed the context flow, but the recomputation still uses the
+> fallback formula which diverges from the operator's hand-typed
+> formula for any non-standard row].
+>
+> **16** (architectural): Ingestion skips computed values — import
+> reads inputs, skips computed columns, then recomputes incorrectly.
+
+#### Implemented solution
+
+1. **`readRowAsLedgerInput()` now returns `{ input, extras }`** where
+   `extras` carries Excel's stored values for `totalVersements` and
+   `totalCreance` (which aren't on `CreateLedgerEntryInput` because
+   the service computes them). The `devisAnnuel` value is stored
+   directly on `input.devisAnnuel`.
+
+2. **`importLedger()` now persists Excel's computed values verbatim**:
+   ```typescript
+   const created = await this.ledger.create(input);
+   const patch: Record<string, number> = {};
+   if (input.devisAnnuel !== undefined) patch.devisAnnuel = input.devisAnnuel;
+   if (extras.totalVersements !== undefined) patch.totalVersements = extras.totalVersements;
+   if (extras.totalCreance !== undefined) patch.totalCreance = extras.totalCreance;
+   if (Object.keys(patch).length > 0) {
+     await this.ledger.update(created.id.value, patch as any);
+   }
+   ```
+   It uses the repository directly (not `LedgerService.update()`)
+   so `computeFields()` doesn't overwrite the values we're trying to
+   preserve.
+
+3. **Pre-existing bug also fixed**: `buildColumnToFieldMap()` was
+   fundamentally broken — it mapped column letters to THEMSELVES
+   instead of to field names, so no field except `studentName` (the
+   hardcoded fallback) ever imported. A new static `EXCEL_HEADER_LABELS`
+   table maps 30+ Excel labels ("DEVIS ANNUEL", "TOTAL VERSEMENTS",
+   "TOTAL*CREANCE", "2V", "1T", "T2", "t3", "E-PLANT", etc.) to
+   camelCase field names.
+
+**Files**:
+- `src/services/excel-ingestion.service.ts`
+
+#### Notes
+
+- The database now faithfully mirrors the spreadsheet for untouched
+  rows. Operator edits still trigger a proper recompute via
+  `LedgerService.update()`.
+- The `buildColumnToFieldMap()` bug was latent — the previous tests
+  for ingestion (iterations 1 and 2) only verified the
+  `findWorksheetByName()` helper (issue 8.8) and the empty-row abort
+  (issue 8.9); they didn't verify that actual field values were
+  imported correctly. The new iteration-3 integration test catches
+  this by round-tripping a real `.xlsx` file.
+- The `EXCEL_HEADER_LABELS` table is intentionally permissive — it
+  accepts both "E-MAIL" and "EMAIL", both "E-PLANT" and "EPLANT",
+  etc., to handle spelling variations in different workbook versions.
+
+#### Tests
+
+`tests/run-iteration3-tests.ts` — section "Fix #20 — Issues 11/16"
+- `readRowAsLedgerInput is no longer exported (internals)` ✓
+- `importLedger() preserves Excel's stored devisAnnuel value on the imported row` ✓ (integration test with a real .xlsx file)
+
+#### Screenshot
+
+See `el-imtiyaz_Variant/screenshots/iteration3-verification.png` — Panel 5.
+
+---
+
+### Fix #21 — Issues 12 / 14: EventBus replaces circular-dep hack
+
+#### Original problem (verbatim)
+
+> **12** (architectural): Missing: formula composition — no service
+> that builds per-row formula from row attributes. (Partly addressed
+> by iter 2 fix #15.)
+>
+> **14** (architectural): Circular dependency hack —
+> `services.feeSchedule["ledger"] = services.ledger` bypasses DI.
+>
+> **§12 of architectural analysis**: In `ipc/index.ts`:
+> ```typescript
+> services.feeSchedule["ledger"] = services.ledger;
+> ```
+> This is a late-injection property assignment that bypasses
+> TypeScript's type system. It exists because
+> `FeeScheduleService.update()` calls `this.ledger.recomputeAll()`
+> when pricing changes, creating a circular dependency.
+
+#### Implemented solution
+
+1. **`FeeScheduleService` constructor now accepts an `EventBus`**:
+   ```typescript
+   constructor(
+     private readonly schedules: FeeScheduleRepository,
+     private readonly eventBus?: IEventBus,
+     ledger?: LedgerService
+   )
+   ```
+
+2. **`FeeScheduleService.update()` publishes a `feeSchedule.changed` event**
+   when pricing changes:
+   ```typescript
+   if (this.eventBus) {
+     await this.eventBus.publish("feeSchedule.changed", {
+       scheduleId: id, before, after: updated, actor: {...},
+     });
+   } else if (this.ledger) {
+     await this.ledger.recomputeAll();  // legacy fallback
+   }
+   ```
+
+3. **`LedgerService` subscribes to `feeSchedule.changed`** in its
+   constructor (via `registerEventSubscriptions()`):
+   ```typescript
+   this.eventBus.subscribe("feeSchedule.changed", async (_event) => {
+     try { await this.recomputeAll(); }
+     catch (err) { logger.error("ledger.recompute.failed", {...}); }
+   });
+   ```
+
+4. **IPC layer updated**: `src/main/ipc/index.ts` now constructs
+   `FeeScheduleService` with the `eventBus`. The
+   `services.feeSchedule["ledger"] = services.ledger;` line has been
+   removed.
+
+5. **Legacy `ledger` field kept** (deprecated) on `FeeScheduleService`
+   for backward compat with any caller that still sets it directly.
+
+**Files**:
+- `src/services/fee-schedule.service.ts`
+- `src/services/ledger.service.ts`
+- `src/main/ipc/index.ts`
+
+#### Notes
+
+- The event-driven approach decouples the two services: the
+  `FeeScheduleService` no longer needs to know that a `LedgerService`
+  exists. Any future subscriber (e.g. a report cache invalidator)
+  can listen to the same event without touching the publisher.
+- The legacy `ledger` field is kept so existing callers that
+  manually wire it (e.g. some unit tests) still work. Both paths
+  are idempotent — `recomputeAll()` just re-evaluates every row —
+  but only ONE should run. We prefer the EventBus path when an
+  eventBus is configured; we fall back to the direct call only when
+  no bus is available.
+- The subscription handler logs failures via `logger.error()` rather
+  than re-throwing — a recomputation failure should not crash the
+  event bus (which would prevent other subscribers from running).
+
+#### Tests
+
+`tests/run-iteration3-tests.ts` — section "Fix #21 — Issues 12/14"
+- `FeeScheduleService accepts an EventBus in its constructor (issue 12)` ✓
+- `FeeScheduleService.update() publishes 'feeSchedule.changed' on the EventBus (issue 14)` ✓
+- `LedgerService subscribes to 'feeSchedule.changed' and recomputes (issue 14)` ✓
+- `IPC layer no longer contains the late-injection hack (issue 14)` ✓
+
+#### Screenshot
+
+See `el-imtiyaz_Variant/screenshots/iteration3-verification.png` — Panel 6.
+
+---
+
+### Fix #22 — Issue 8.7: Duplicate devis number detection (soft warning)
+
+#### Original problem (verbatim)
+
+> Excel's Devis sheet has duplicate devis numbers (two blocks share
+> `0103/2021/2022`, two share `0104/2021/2022`, two share
+> `0107/2021/2022`). The software's quote block entity has no
+> uniqueness constraint on name/number, so this is technically
+> allowed but could cause confusion.
+
+#### Implemented solution
+
+1. **New `QuoteService.checkDuplicateName(name)` method** scans
+   existing non-deleted quote blocks and returns a warning when a
+   block with the same name already exists.
+
+2. **`QuoteService.create()` calls `checkDuplicateName()`** alongside
+   `validateInput()` (the Nb 02 check from Fix #19) and logs the
+   combined warnings.
+
+3. **The save is NOT blocked** — Excel allows duplicates (they may
+   be intentional re-quotes for the same family), but the operator
+   gets clear feedback to verify.
+
+**File**: `src/services/quote.service.ts`
+
+#### Notes
+
+- The `quote_blocks` table has no uniqueness constraint on `name`,
+  and we intentionally did NOT add one — Excel's data already
+  contains duplicates, and a uniqueness constraint would break
+  imports of legacy workbooks.
+- The check is O(n) over all non-deleted quote blocks. For the
+  expected scale (≤ a few hundred blocks per academic year), this
+  is fine. If the block count ever grows significantly, an index on
+  `name` would make the check O(log n).
+- The warning message includes the count of prior occurrences, so
+  the operator can distinguish "1 prior" (probably a re-quote) from
+  "10 priors" (probably a typo or a systematically-duplicated
+  identifier).
+
+#### Tests
+
+`tests/run-iteration3-tests.ts` — section "Fix #22 — Issue 8.7"
+- `checkDuplicateName returns no warning when no prior block exists` ✓
+- `checkDuplicateName returns a warning when a prior block with the same name exists` ✓
+- `create() succeeds even when a duplicate name exists (Excel allows duplicates)` ✓
+- `checkDuplicateName returns no warning for empty / whitespace names` ✓
+
+#### Screenshot
+
+See `el-imtiyaz_Variant/screenshots/iteration3-verification.png` — Panel 7.
+
+---
+
+
 
 ## Iteration 2 — 8 critical / high-severity issues resolved
 
@@ -1177,8 +1705,15 @@ From the `el-imtiyaz_Variant/` directory:
 # Install dependencies (first time only)
 npm install
 
-# Unit tests (35 tests, ~5 seconds)
+# Iteration 1 unit tests (35 tests, ~5 seconds)
 npx tsx tests/run-all-tests.ts
+
+# Iteration 2 unit/integration tests (35 tests, ~5 seconds)
+npx tsx tests/run-iteration2-tests.ts
+
+# Iteration 3 unit/integration tests (35 tests, ~10 seconds — includes
+# a real .xlsx round-trip integration test for issues 11/16)
+npx tsx tests/run-iteration3-tests.ts
 
 # Integration tests (6 tests, ~2 seconds — uses an in-memory SQLite DB)
 npx tsx tests/integration/ledger-service.test.ts
@@ -1186,27 +1721,26 @@ npx tsx tests/integration/ledger-service.test.ts
 # Regenerate the verification screenshots
 npx tsx scripts/generate-screenshot.ts
 npx tsx scripts/generate-test-output-screenshots.ts
+npx tsx scripts/generate-iteration2-screenshot.ts
+npx tsx scripts/generate-iteration2-test-output-screenshot.ts
+npx tsx scripts/generate-iteration3-screenshot.ts
+npx tsx scripts/generate-iteration3-test-output-screenshot.ts
 ```
 
-## What was NOT fixed in this iteration (and why)
+## What was NOT fixed (and why)
 
-The remaining 40+ issues in `software_review.md` are intentionally
+The remaining ~25 issues in `software_review.md` are intentionally
 left for future iterations. They fall into categories that are either:
 
-1. **Architecturally deep** — e.g. the broken inter-rule data flow
-   (§1 of the architectural analysis), the flat fee schedule (§3),
-   the missing transport conditional (§4), the per-row formula model
-   (§2). These require coordinated refactors across multiple services
-   and would not fit in a single iteration's context window.
+1. **Architecturally deep** — e.g. the flat fee schedule as a lookup
+   table (§3 of the architectural analysis), the per-row formula
+   model (§2). These require coordinated refactors across multiple
+   services and would not fit in a single iteration's context window.
 2. **Require business-decision input** — e.g. the sibling-discount
    pipeline (Mismatch C), the BON print template (Mismatch E), the
    family-grouping service (§8.1). These need product-owner decisions
    about the desired workflow before code can be written.
-3. **Phantom features that should be removed only after a migration
-   plan** — e.g. the `advances` field on QuoteBlock (§5.2), the
-   `schoolFeeTax` persisted field (§5.3, §9.2). Removing them
-   requires a database migration and UI changes.
-4. **Display-layer concerns** — e.g. conditional formatting (§7.4).
+3. **Display-layer concerns** — e.g. conditional formatting (§7.4).
    These are UI tasks that should be tackled in a dedicated frontend
    iteration.
 

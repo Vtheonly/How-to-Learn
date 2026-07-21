@@ -554,5 +554,33 @@ export const migrations: Migration[] = [
       );
       CREATE INDEX IF NOT EXISTS idx_spreadsheet_templates_hash ON spreadsheet_templates(source_file_hash);
     `
+  },
+  {
+    id: '006_iteration3_quote_block_columns',
+    description: 'Iteration 3 — add remboursement and payment_date columns to quote_blocks (issues 5.2 and 5.3/5.4)',
+    up: `
+      -- ── Issue 5.2: remboursement column ────────────────────────────
+      --
+      -- Excel's Devis sheet computes the grand total in two equivalent
+      -- ways depending on the block:
+      --   I31: =I27 - I29                (subtotal - reduction)
+      --   I31: =I27 - I29 - I30          (subtotal - reduction - remboursement)
+      --
+      -- The previous software model conflated these into a single
+      -- 'advances' field that doesn't exist in Excel. We add a real
+      -- 'remboursement' column so the second formula can be reproduced
+      -- faithfully. The legacy 'advances' column is kept for backward
+      -- compatibility but its value is no longer used in netPayable.
+      ALTER TABLE quote_blocks ADD COLUMN remboursement REAL NOT NULL DEFAULT 0;
+
+      -- ── Issues 5.3 / 5.4: payment_date column ─────────────────────
+      --
+      -- Excel's D35 note says a 5% bonus applies 'if paid in full
+      -- before 30 June'. The previous software persisted schoolFeeTax
+      -- unconditionally as a computed field. We add a 'payment_date'
+      -- column so the service can evaluate the early-payment condition
+      -- and only compute the bonus when paymentDate <= cutoff.
+      ALTER TABLE quote_blocks ADD COLUMN payment_date TEXT;
+    `
   }
 ];
