@@ -23,6 +23,27 @@ import {
 } from "../infrastructure/error/app-error";
 import { logger } from "../infrastructure/logger/logger";
 import { safeEvaluate } from "./formula/formula-engine";
+import {
+  resolveRegistration,
+  resolveTuition,
+  resolveTransportAmount,
+  resolveTransportTier,
+  TRANSPORT_AMOUNT_BY_TIER,
+  TransportTier,
+} from "../shared/pricing";
+
+/**
+ * A soft validation warning. Excel's data-validation rules on column AG
+ * (CREANCES SEPTEMBRE) use `showErrorMessage=False`, which means Excel
+ * shows the operator an advisory tooltip but does NOT block the save.
+ * The software mirrors that semantics by returning warnings rather than
+ * throwing — see issues 6.1 and 6.2 in software_review.md.
+ */
+export interface ValidationWarning {
+  field: string;
+  message: string;
+  value: unknown;
+}
 
 export interface LedgerSummary {
   totalEntries: number;
@@ -75,7 +96,15 @@ export class LedgerService {
   }
 
   async create(input: CreateLedgerEntryInput): Promise<LedgerEntry> {
-    this.validateInput(input);
+    const warnings = this.validateInput(input);
+    if (warnings.length > 0) {
+      // Excel's september-balance rule is `showErrorMessage=False` — soft.
+      // Log and continue rather than blocking the save.
+      logger.warn("ledger.entry.validationWarnings", {
+        studentName: input.studentName,
+        warnings,
+      });
+    }
     const computed = await this.computeFields(input);
     const entry = await this.ledger.create({ ...input, ...computed });
 
@@ -98,7 +127,14 @@ export class LedgerService {
     patch: UpdateLedgerEntryInput,
   ): Promise<LedgerEntry> {
     const before = await this.getById(id);
-    this.validateInput({ ...before, ...patch });
+    const warnings = this.validateInput({ ...before, ...patch });
+    if (warnings.length > 0) {
+      // Soft warnings — see create() above and issues 6.1 / 6.2.
+      logger.warn("ledger.entry.validationWarnings", {
+        id,
+        warnings,
+      });
+    }
 
     const merged = { ...before, ...patch } as CreateLedgerEntryInput;
     const computed = await this.computeFields(merged);
@@ -137,13 +173,83 @@ export class LedgerService {
     });
     rules.sort((a, b) => a.priority - b.priority);
 
+    // ── FATAL FLAW FIX (issue §1 / #1 in software_review.md) ──────────
+    //
+    // The previous version of this method evaluated each rule against
+    // the SAME stale `ctx.fields` dictionary. The TOTAL CREANCE rule
+    // (`devisAnnuel - totalVersements`) always returned 0 because
+    // neither `devisAnnuel` nor `totalVersements` was written back to
+    // the context after being computed.
+    //
+    // The fix: after each rule evaluation, write the result back to
+    // `ctx.fields` so the next rule (in priority order) can read it.
+    // This makes the calculation pipeline a real directed acyclic graph:
+    //
+    //   J (remise) ──┐
+    //   constants ───┼──→ L (devisAnnuel) ──┐
+    //                │                       ├──→ Q (totalCreance)
+    //   R–Y ─────────┼──→ P (totalVersements)┘
+    //                │
+    //   ── Level-indexed pricing (issues 1.1, 1.2) ──
+    //   Level (G) ───┼──→ registration, tuition
+    //   Destination ─┼──→ transport (4 tiers — issue 1.3)
+    //
+    // The fallback paths (the ternary `else` branches) continue to use
+    // the local variables so they remain correct when no rule is
+    // defined. They also seed `ctx.fields` so any downstream rule can
+    // read the computed value.
+
     const devisRule = rules.find((r) => r.targetField === "devisAnnuel");
-    const devisAnnuel = devisRule
-      ? this.evalNumeric(devisRule, ctx)
-      : (input.fi ?? 25000) +
-        205000 +
-        (input.optionCode === "TRNSP" ? 35000 : 0) -
+    let devisAnnuel: number;
+    if (devisRule) {
+      devisAnnuel = this.evalNumeric(devisRule, ctx);
+    } else {
+      // Fallback formula — Excel-equivalent per-row composition.
+      //
+      // Issues addressed by this fallback:
+      //   - 1.1: registration is level-indexed via resolveRegistration()
+      //   - 1.2: tuition is level-indexed via resolveTuition()
+      //   - 1.3: transport uses 4 tiers via resolveTransportAmount()
+      //   - 8.4: transport is only added when OPTION=TRNSP AND a
+      //          destination is populated. Excel rows with OPTION=TRNSP
+      //          but no destination (operator forgot) get NO transport
+      //          component — matching the spreadsheet.
+      //
+      // Issue 1.4 (dual transport — adding BOTH 35k base AND 55k premium
+      // for FAR-tier destinations) is intentionally NOT applied by the
+      // fallback. The vault evidence (Town List DISTINATION.md) notes
+      // that this dual-transport pattern is rare and varies by operator.
+      // We expose both `transportBase` and `transportPremium` (plus
+      // `transportIntermediate` and `transportMedium`) in `ctx.fields`
+      // so a user-defined rule CAN compose a dual-transport formula
+      // (e.g. `registration + baseTuition + transportBase + transportPremium - remise`)
+      // when the operator's workflow requires it.
+      const registration = resolveRegistration(input.level);
+      const tuition = resolveTuition(input.level);
+      const hasTransportOption = (input.optionCode ?? "").toUpperCase() === "TRNSP";
+      const hasDestination = !!(input.destination && String(input.destination).trim());
+      const transport = (hasTransportOption && hasDestination)
+        ? resolveTransportAmount(input.destination)
+        : 0;
+      devisAnnuel =
+        (input.fi ?? registration) +
+        tuition +
+        transport -
         (input.remise ?? 0);
+      // Write back to ctx for downstream rules (issue §1 fix) and to
+      // expose the individual tiers so a user-defined rule can opt
+      // into the dual-transport pattern (issue 1.4).
+      ctx.fields.registration = registration;
+      ctx.fields.baseTuition = tuition;
+      ctx.fields.transportBase = (hasTransportOption && hasDestination)
+        ? resolveTransportAmount(input.destination)
+        : 0;
+      ctx.fields.transportPremium = (hasTransportOption && hasDestination)
+        ? TRANSPORT_AMOUNT_BY_TIER[TransportTier.FAR]
+        : 0;
+    }
+    // ALWAYS write devisAnnuel back to ctx so TOTAL CREANCE can read it.
+    ctx.fields.devisAnnuel = devisAnnuel;
 
     const versementsRule = rules.find(
       (r) => r.targetField === "totalVersements",
@@ -157,25 +263,30 @@ export class LedgerService {
         (input.t1 ?? 0) +
         (input.t2 ?? 0) +
         (input.t3 ?? 0);
+    // Write totalVersements back to ctx so TOTAL CREANCE can read it.
+    ctx.fields.totalVersements = totalVersements;
 
     const creanceRule = rules.find((r) => r.targetField === "totalCreance");
     const totalCreance = creanceRule
       ? this.evalNumeric(creanceRule, ctx)
       : devisAnnuel - totalVersements;
+    // Write totalCreance back to ctx for any downstream rule (e.g. grandTotal).
+    ctx.fields.totalCreance = totalCreance;
 
+    // grandTotal is intentionally NOT computed.
+    //
+    // Background (issues 2.3 and 9.3 in software_review.md): Excel column
+    // AL (TOTAL / GRAND TOTAL) is entirely empty in the source workbook —
+    // there is no formula to reproduce. The previous version of this file
+    // computed `grandTotal = totalVersements + extras + quarterly`, which
+    // was an invented calculation. We now persist 0 (the database column
+    // is NOT NULL DEFAULT 0) and rely on the upstream caller to compute
+    // any aggregate they need via a dedicated report query.
+    //
+    // If a user explicitly creates a `grandTotal` formula rule, we still
+    // honour it for backward compatibility — but we no longer seed one.
     const grandTotalRule = rules.find((r) => r.targetField === "grandTotal");
-    const grandTotal = grandTotalRule
-      ? this.evalNumeric(grandTotalRule, ctx)
-      : totalVersements +
-        (input.psy1 ?? 0) +
-        (input.psy2 ?? 0) +
-        (input.orth1 ?? 0) +
-        (input.orth2 ?? 0) +
-        (input.ePlant ?? 0) +
-        (input.ratrapage ?? 0) +
-        (input.september ?? 0) +
-        (input.december ?? 0) +
-        (input.march ?? 0);
+    const grandTotal = grandTotalRule ? this.evalNumeric(grandTotalRule, ctx) : 0;
 
     return { devisAnnuel, totalVersements, totalCreance, grandTotal };
   }
@@ -203,6 +314,30 @@ export class LedgerService {
     return { recomputed, skipped, errors };
   }
 
+  /**
+   * Record a payment against a ledger entry.
+   *
+   * Excel behaviour reproduced here (issues 4.1 and 9.1 in
+   * software_review.md): the source workbook has **no caps** on the
+   * individual payment columns (R/S/T/U/W/X/Y). The operator types
+   * whatever amount was received into whichever column they choose —
+   * a student might pay 100,000 in column S (V2) for a single tranche,
+   * or split a payment across tranches manually.
+   *
+   * The previous version of this method auto-allocated `amount` across
+   * the seven payment slots using hardcoded caps (fi=25k, v2=71.5k,
+   * altV2=71.5k, v3=71.5k, t1=30k, t2=15k, t3=10k). Those caps only
+   * matched Primary-school students and silently corrupted payments for
+   * Collège/Lycée students (whose real installments are larger) and for
+   * students without transport (who got phantom transport payments).
+   *
+   * We now **only record an audit-trail comment** (column AM in the
+   * source workbook). The caller — typically the UI's payment form or
+   * the PaymentService — is responsible for deciding which slot to
+   * credit, exactly as the Excel operator does. This matches the
+   * spreadsheet workflow and avoids introducing column-level data that
+   * doesn't reflect the operator's intent.
+   */
   async allocatePaymentToLedger(
     studentId: string,
     amount: number,
@@ -212,38 +347,28 @@ export class LedgerService {
     if (entries.length === 0) return;
     const entry = entries[0];
 
-    let remaining = amount;
-    const updates: Partial<LedgerEntry> = {};
+    // Record the audit-trail comment in column-AM format:
+    //   amount/day/month/receiptBook
+    // This mirrors the Excel workflow where the operator hand-types
+    // a comment per payment. We do NOT mutate the payment columns
+    // (R–Y) — the operator decides which slot to credit via the UI.
+    const now = new Date();
+    const day = now.getDate();
+    const month = now.getMonth() + 1; // 1-indexed month
+    const rawText = `${amount}/${day}/${month} ${rcp}`;
 
-    const slots = [
-      { key: "fi", max: 25000 },
-      { key: "v2", max: 71500 },
-      { key: "altV2", max: 71500 },
-      { key: "v3", max: 71500 },
-      { key: "t1", max: 30000 },
-      { key: "t2", max: 15000 },
-      { key: "t3", max: 10000 },
-    ] as const;
+    await this.auditComments.create({
+      ledgerEntryId: entry.id.value,
+      studentId,
+      rawText,
+    });
 
-    for (const slot of slots) {
-      if (remaining <= 0) break;
-      const currentVal = (entry as any)[slot.key] as number;
-      const cap = slot.max;
-      if (currentVal < cap) {
-        const fill = Math.min(remaining, cap - currentVal);
-        (updates as any)[slot.key] = currentVal + fill;
-        remaining -= fill;
-      }
-    }
-
-    if (Object.keys(updates).length > 0) {
-      await this.update(entry.id.value, updates);
-      await this.auditComments.create({
-        ledgerEntryId: entry.id.value,
-        studentId,
-        rawText: `${amount}/${new Date().getDate()}/${new Date().getMonth() + 1} Batch: ${rcp}`,
-      });
-    }
+    logger.info("ledger.payment.auditRecorded", {
+      ledgerEntryId: entry.id.value,
+      studentId,
+      amount,
+      rcp,
+    });
   }
 
   async getSummary(): Promise<LedgerSummary> {
@@ -308,30 +433,67 @@ export class LedgerService {
     return this.auditComments.create(input);
   }
 
-  private validateInput(input: any) {
+  /**
+   * Validate a ledger-entry input.
+   *
+   * Excel behaviour reproduced here (issues 6.1 and 6.2 in
+   * software_review.md):
+   *   - Hard errors (ValidationError) are reserved for fields that are
+   *     genuinely malformed (negative remise, blank student name). Excel
+   *     blocks these too.
+   *   - Soft warnings (returned in the `ValidationWarning[]` array) cover
+   *     the septemberBalance rule. Excel's validation on `AG1:AG1032` is
+   *     configured with `showErrorMessage=False` — i.e. advisory only.
+   *     The previous version of this file threw a BusinessRuleError, which
+   *     blocked valid computed balances from being persisted. We now log
+   *     a warning instead and let the save proceed.
+   *   - Column AG itself is empty in the actual workbook, so the rule is
+   *     effectively unused — but we keep the soft check for forward
+   *     compatibility in case operators start populating it.
+   */
+  private validateInput(input: any): ValidationWarning[] {
+    const warnings: ValidationWarning[] = [];
+
+    // ── Hard validations ──
     if (input.studentName !== undefined && !String(input.studentName).trim()) {
       throw new ValidationError("NOM (Student Name) is required.");
     }
     if (input.remise !== undefined && input.remise < 0) {
       throw new ValidationError("Remise cannot be negative.");
     }
+
+    // ── Soft validations (advisory, mirror Excel's showErrorMessage=False) ──
     if (
       input.septemberBalance !== undefined &&
       input.septemberBalance !== null
     ) {
       if (input.septemberBalance >= SEPTEMBER_BALANCE_MAX) {
-        throw new BusinessRuleError(
-          `September balance limit violation: ${input.septemberBalance} exceeds maximum permitted.`,
-        );
+        warnings.push({
+          field: "septemberBalance",
+          value: input.septemberBalance,
+          message: `September balance (${input.septemberBalance}) is at or above the advisory limit of ${SEPTEMBER_BALANCE_MAX} DZD. Excel's data validation on column AG is configured as showErrorMessage=False (advisory only), so the save proceeds.`,
+        });
       }
     }
+
+    return warnings;
   }
 
   private buildFormulaContext(
     input: CreateLedgerEntryInput,
     schedule: FeeSchedule | null,
   ) {
+    // ── Issue §17 (context missing metadata) ──────────────────────────
+    //
+    // The previous version of this method only injected numeric fields
+    // into `ctx.fields`. Formula rules could not reference `optionCode`,
+    // `level`, `classCode`, or `destination` — even though these strings
+    // are exactly what the Excel operator uses to decide which formula
+    // components to include. We now inject them as strings, so a rule
+    // like `IF(optionCode = "TRNSP", registration + tuition + transport,
+    // registration + tuition) - remise` becomes possible.
     const fields: Record<string, unknown> = {
+      // Numeric payment / discount columns (unchanged)
       remise: input.remise ?? 0,
       fi: input.fi ?? 0,
       v2: input.v2 ?? 0,
@@ -352,16 +514,53 @@ export class LedgerService {
       reimbursement: input.reimbursement ?? 0,
       priorDebt: input.priorDebt ?? 0,
       debtSettlement: input.debtSettlement ?? 0,
+
+      // ── NEW (issue §17): row metadata, so formulas can branch on it ──
+      optionCode: input.optionCode ?? "",
+      level: input.level ?? "",
+      classCode: input.classCode ?? "",
+      destination: input.destination ?? "",
+      hasTransport:
+        (input.optionCode ?? "").toUpperCase() === "TRNSP" &&
+        !!(input.destination && String(input.destination).trim()),
     };
 
     const lines: FeeScheduleLine[] = schedule?.lines ?? [];
     const findLine = (type: string) =>
       lines.find((l) => l.type === type)?.amount ?? 0;
 
-    fields.registration = findLine("registration") || 25000;
-    fields.baseTuition = findLine("tuition") || 205000;
+    // ── Issues 1.1, 1.2: level-indexed pricing ────────────────────────
+    //
+    // When the active FeeSchedule has explicit `registration` and
+    // `tuition` lines, we honour them (operators may have configured
+    // a custom schedule). Otherwise we fall back to the level-indexed
+    // lookups from `shared/pricing.ts`, which use the canonical
+    // Excel values (18k for MS/GS, 25k for PRIM, 30k for COLG/LYC, etc.).
+    fields.registration =
+      findLine("registration") || resolveRegistration(input.level);
+    fields.baseTuition =
+      findLine("tuition") || resolveTuition(input.level);
+
+    // ── Issue 1.3: all 4 transport tiers are now exposed ──────────────
+    //
+    // The previous version only exposed `transportBase` (35k) and
+    // `transportPremium` (55k). We now also expose `transportIntermediate`
+    // (43k) and `transportMedium` (52k), so formulas can reference any
+    // of the 4 documented tiers.
     fields.transportBase = findLine("transport_base") || 35000;
+    fields.transportIntermediate = findLine("transport_intermediate") || 43000;
+    fields.transportMedium = findLine("transport_medium") || 52000;
     fields.transportPremium = findLine("transport_premium") || 55000;
+
+    // ── Issue 1.3 + 8.4: resolved transport amount for this row ──────
+    //
+    // `resolvedTransport` is the destination-appropriate transport
+    // amount, or 0 when the student has no transport. Formulas that
+    // want "whatever transport applies to THIS row" can reference
+    // this single field instead of branching on `destination`.
+    fields.resolvedTransport = (input.optionCode ?? "").toUpperCase() === "TRNSP"
+      ? resolveTransportAmount(input.destination)
+      : 0;
 
     return { fields };
   }

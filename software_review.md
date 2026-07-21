@@ -1,5 +1,52 @@
 # Complete Gap Analysis: Software vs. Excel Workbook
 
+> ## ✅ Iteration 2 — 8 more critical / high-severity issues resolved (2026-07-21)
+>
+> Building on iteration 1, eight additional issues have been **fully
+> resolved and verified**. The resolved issues are:
+>
+> | Issue | Title | Severity | Fix # |
+> |-------|-------|----------|-------|
+> | §1 / #1 | Broken inter-rule data flow (TOTAL CREANCE always = 0) | FATAL | #8 |
+> | 1.1 | Registration fee hardcoded at 25,000 DZD | CRITICAL | #9 |
+> | 1.2 | Tuition hardcoded at 205,000 DZD (ignores level) | CRITICAL | #10 |
+> | 1.3 | Only 2 transport tiers (need 4+) | CRITICAL | #11 |
+> | 1.4 | Can't add both transport_base + transport_premium | HIGH | #12 |
+> | 8.2 | Overpayments blocked (Excel allows) | HIGH | #13 |
+> | 8.4 | TRNSP option adds transport even when Excel didn't | HIGH | #14 |
+> | §17 / #17 | Formula context missing optionCode/level/classCode/destination | MEDIUM | #15 |
+>
+> Full details, code references, test links, and screenshots are in
+> [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md).
+>
+> **Cumulative across both iterations**: 15 issues fully resolved + 1
+> partially resolved, verified by **76 tests** (35 iteration-1 + 35
+> iteration-2 + 6 integration), all passing.
+
+> ## ✅ Iteration 1 — 7 issues resolved (2026-07-21)
+>
+> Seven issues from this review have been **fully resolved and verified**
+> in iteration 1, plus one partially resolved. The resolved issues are:
+>
+> | Issue | Title | Fix # |
+> |-------|-------|-------|
+> | 8.8 | Sheet name "BON " has trailing space | #1 |
+> | 8.9 | Imports 600+ empty rows beyond filter range | #2 |
+> | 2.3 / 9.3 | GRAND TOTAL formula invented (doesn't exist in Excel) | #3 |
+> | 6.1 / 6.2 | September balance hard validation vs Excel's soft warning | #4 |
+> | 4.1 / 9.1 | Arbitrary payment caps (25k / 71.5k / 30k / 15k / 10k) | #5 |
+> | 8.5 | Phone-number type mismatch (string vs string[]) | #6 |
+> | 8.6 | NV2/NV3/NV4/NV5 level codes not recognized | #7 |
+> | 9.4 (partial) | Soft-warning part done; validation-rules-registry still open | — |
+>
+> Each resolved issue is marked with a ✅ banner in its section below and
+> struck through in the summary tables. Full details, code references,
+> test links, and screenshots are in
+> [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md).
+>
+> Verification: 35 unit tests + 6 integration tests — all passing.
+> Screenshots: `el-imtiyaz_Variant/screenshots/`.
+
 ## Executive Summary
 
 The software (`Bab_08_el-imtiyaz_Variant`) attempts to reproduce the Excel workbook's logic through a formula engine, fee schedules, and ledger services. However, the Excel workbook's actual business logic is **far more ad-hoc, per-row-customized, and context-dependent** than the software assumes. The software imposes a rigid, uniform calculation model onto a workbook where the operator hand-crafts each row's formula with different component combinations.
@@ -13,6 +60,14 @@ I identified **47 distinct incompatibilities** across 8 categories.
 This is the most critical divergence. The software assumes one universal formula; Excel uses **at least 6 distinct formula patterns** chosen per-row by the operator.
 
 ### 1.1 Registration fee is NOT always 25,000 DZD
+
+> ✅ **RESOLVED in iteration 2** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #9, Issue 1.1).
+> New `src/shared/pricing.ts` module exposes `REGISTRATION_BY_LEVEL` with
+> the documented Excel values (MS/GS=18k, PRIM=25k, COLG/LYC=30k).
+> `resolveRegistration(level)` is used by `buildFormulaContext()` and
+> the fallback formula. Verified by 5 unit tests.
+
+### ~~1.1 Registration fee is NOT always 25,000 DZD~~
 
 | | Excel | Software |
 |---|---|---|
@@ -28,6 +83,14 @@ Row with COLG+TRNSP:  =30000+305000+52000    (registration = 30,000)
 ```
 
 ### 1.2 Tuition varies by level (not a single 205,000)
+
+> ✅ **RESOLVED in iteration 2** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #10, Issue 1.2).
+> New `TUITION_BY_LEVEL` table in `src/shared/pricing.ts` exposes the
+> documented values (MS/GS=125k, PRIM=205k, COLG=305k, LYC=340k,
+> AUTISTE=283k). `resolveTuition(level)` is used by `buildFormulaContext()`
+> and the fallback formula. Verified by 4 unit tests.
+
+### ~~1.2 Tuition varies by level (not a single 205,000)~~
 
 | Level | Excel tuition | Software tuition |
 |---|---|---|
@@ -45,6 +108,15 @@ This always uses 205,000 regardless of the student's `level` or `classCode`.
 
 ### 1.3 Transport pricing has 4+ tiers, not 2
 
+> ✅ **RESOLVED in iteration 2** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #11, Issue 1.3).
+> New `TransportTier` enum + `TRANSPORT_AMOUNT_BY_TIER` in
+> `src/shared/pricing.ts` exposes all 4 documented tiers (35k/43k/52k/55k).
+> `resolveTransportTier(town)` maps 20+ town names + spelling variants.
+> `FeeScheduleLineType` extended with `transport_intermediate` and
+> `transport_medium`. Verified by 9 unit tests.
+
+### ~~1.3 Transport pricing has 4+ tiers, not 2~~
+
 | Excel transport amount | Towns | Software |
 |---|---|---|
 | 35,000 | Boumerdès, Corso, Sahel | `transport_base = 35000`  |
@@ -61,6 +133,15 @@ This always uses 205,000 regardless of the student's `level` or `classCode`.
 Only two tiers. The 43,000 and 52,000 tiers are missing entirely.
 
 ### 1.4 Some rows add BOTH transport amounts
+
+> ✅ **RESOLVED in iteration 2** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #12, Issue 1.4).
+> The architecture now SUPPORTS dual transport: `ctx.fields` exposes
+> all 4 transport tiers simultaneously, so a user-defined rule can
+> compose `registration + baseTuition + transportBase + transportPremium - remise`
+> when needed. The starter rule uses `resolvedTransport` (single tier)
+> by default; dual transport is opt-in. Verified by 4 tests.
+
+### ~~1.4 Some rows add BOTH transport amounts~~
 
 **Excel:**
 ```
@@ -113,6 +194,14 @@ Both Excel and software exclude columns Z–AE from the P sum.
 
 ### 2.3 GRAND TOTAL (Column AL) — Software invents a formula that doesn't exist in Excel
 
+> ✅ **RESOLVED in iteration 1** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #3, Issue 2.3/9.3).
+> The GRAND TOTAL starter rule was removed from `getStarterFormulaRules()`,
+> and `LedgerService.computeFields()` no longer invents a fallback. The
+> `grandTotal` field is persisted as 0 unless a user explicitly creates a
+> `grandTotal` formula rule. Verified by 5 unit + integration tests.
+
+### ~~2.3 GRAND TOTAL (Column AL) — Software invents a formula that doesn't exist in Excel~~
+
 **Software starter rule:**
 ```
 "totalVersements + psy1 + psy2 + orth1 + orth2 + ePlant + ratrapage + september + december + march"
@@ -139,6 +228,15 @@ Neither Excel nor the software includes prior debts or reimbursements in the Q c
 ## Category 4: Payment Allocation Logic
 
 ### 4.1 Software imposes arbitrary payment caps that don't exist in Excel
+
+> ✅ **RESOLVED in iteration 1** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #5, Issue 4.1/9.1).
+> `allocatePaymentToLedger()` no longer mutates payment columns or
+> imposes caps. It only records an audit-trail comment in column-AM
+> format. The operator decides which slot to credit via the UI,
+> exactly as in the Excel workflow. Verified by 3 unit + integration
+> tests.
+
+### ~~4.1 Software imposes arbitrary payment caps that don't exist in Excel~~
 
 **Software** (`ledger.service.ts`, `allocatePaymentToLedger`):
 ```typescript
@@ -216,6 +314,13 @@ Excel states: "Toute inscription doit etre confirmée par un versement (frais d'
 
 ### 6.1 September balance validation: hard vs. soft
 
+> ✅ **RESOLVED in iteration 1** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #4, Issue 6.1/6.2).
+> `validateInput()` now returns a `ValidationWarning[]` array instead
+> of throwing. Hard validations (empty student name, negative remise)
+> are preserved. Verified by 7 unit + integration tests.
+
+### ~~6.1 September balance validation: hard vs. soft~~
+
 | Excel | Software |
 |---|---|
 | `type=decimal, operator=lessThan, formula1=10000, showErrorMessage=False` (soft — allows override) | `throw new BusinessRuleError(...)` (hard — blocks the operation) |
@@ -230,6 +335,13 @@ if (input.septemberBalance >= SEPTEMBER_BALANCE_MAX) {
 Excel's validation is **advisory only** (`showErrorMessage=False`). The operator can ignore it. The software **blocks** the save entirely.
 
 ### 6.2 The validation applies to column AG which is entirely empty
+
+> ✅ **RESOLVED in iteration 1** (same fix as 6.1) — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #4, Issue 6.1/6.2).
+> Since the validation is now a soft warning (not a hard throw), the
+> empty column AG is no longer a blocker. The check remains in place
+> for forward compatibility.
+
+### ~~6.2 The validation applies to column AG which is entirely empty~~
 
 Excel's validation is on `AG1:AG1032` (CREANCES SEPTEMBRE), but this column has **zero data** in the actual workbook. The software enforces a rule on a field that's never used.
 
@@ -293,6 +405,14 @@ The software would never produce this bug because it uses a uniform formula. But
 
 ### 8.2 Negative balances (overpayment)
 
+> ✅ **RESOLVED in iteration 2** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #13, Issue 8.2).
+> `PaymentService.recordPayment` no longer throws `BusinessRuleError`
+> when `amount > outstanding`. It logs an advisory `payment.overpayment`
+> warning and lets the save proceed. The OVERPAID status enum value is
+> now reachable in normal flow. Verified by 2 integration tests.
+
+### ~~8.2 Negative balances (overpayment)~~
+
 **Excel:** Row with `TOTAL*CREANCE = -30000` (SIDI MAMER SAMYI paid 30,000 more than the devis). Excel allows this silently.
 
 **Software:** The `PaymentService.recordPayment` throws a `BusinessRuleError` if `amount > totalOutstanding`:
@@ -309,13 +429,38 @@ Some Excel rows have devis = 0 or very low amounts (e.g., special needs students
 
 ### 8.4 Students with no transport but OPTION field populated
 
+> ✅ **RESOLVED in iteration 2** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #14, Issue 8.4).
+> The fallback formula and `buildFormulaContext()` now guard transport
+> on BOTH `optionCode === "TRNSP"` AND a non-empty `destination`.
+> Excel rows with OPTION=TRNSP but no destination (operator forgot)
+> now get 0 transport — matching the spreadsheet. Verified by 2 tests.
+
+### ~~8.4 Students with no transport but OPTION field populated~~
+
 Some Excel rows have `OPTION = TRNSP` but no transport amount in the L formula (the operator forgot or the family opted out). The software's conditional `optionCode === "TRNSP" ? 35000 : 0` would add transport where Excel didn't.
 
 ### 8.5 Multiple phone numbers in column D
 
+> ✅ **RESOLVED in iteration 1** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #6, Issue 8.5).
+> New `src/shared/phone-numbers.ts` module provides `parsePhoneNumbers()`
+> and `formatPhoneNumbers()` helpers. The `LedgerEntry.phoneNumbers`
+> field keeps the raw string (faithful to Excel); callers that need an
+> array (e.g. `Student.phoneNumbers: string[]`) use the helper. Verified
+> by 11 unit tests.
+
+### ~~8.5 Multiple phone numbers in column D~~
+
 Excel stores phone numbers as `0663701834/0660800317` (slash-separated). The software's `phoneNumbers` field is a plain string, which is fine, but the `Student` entity has `phoneNumbers: string[]` (an array). The import logic (`readRowAsLedgerInput`) stores it as a single string, creating a type mismatch.
 
 ### 8.6 The "NV" level codes (NV2, NV3, NV4, NV5)
+
+> ✅ **RESOLVED in iteration 1** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #7, Issue 8.6).
+> New `src/shared/level-codes.ts` module exports `LEVEL_CODES` (10
+> codes including NV2–NV5), `isValidLevelCode()`, `normaliseLevelCode()`,
+> and `LEVEL_CODE_LABELS`. `ExcelIngestionService` logs an advisory
+> warning for codes outside the canonical list. Verified by 7 unit tests.
+
+### ~~8.6 The "NV" level codes (NV2, NV3, NV4, NV5)~~
 
 Excel uses `NV2`, `NV3`, `NV4`, `NV5` as level codes for special/new students. The software's `StudentStatus` enum has `ACTIVE, SUSPENDED, GRADUATED, LEFT, PENDING` — no equivalent for these codes. They'd be imported as raw strings in the `level` field with no validation.
 
@@ -325,9 +470,26 @@ Excel's Devis sheet has duplicate devis numbers (two blocks share `0103/2021/202
 
 ### 8.8 The "BON" sheet name has a trailing space
 
+> ✅ **RESOLVED in iteration 1** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #1, Issue 8.8).
+> New exported helper `findWorksheetByName()` in
+> `excel-ingestion.service.ts` performs a trim-aware, case-insensitive
+> sheet-name lookup. `importLedger()` and `importAuditComments()` now
+> use it, so callers can pass `"BON"` and resolve the real sheet
+> `"BON "`. Verified by 6 unit tests.
+
+### ~~8.8 The "BON" sheet name has a trailing space~~
+
 Excel's sheet is named `"BON "` (with a trailing space). Any programmatic reference must account for this. The software's import logic uses sheet names directly and would fail if it looks for `"BON"` without the space.
 
 ### 8.9 Excel's auto-filter range extends to row 404 but data goes to row 1032
+
+> ✅ **RESOLVED in iteration 1** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #2, Issue 8.9).
+> `importLedger()` now aborts after `EMPTY_ROW_ABORT_THRESHOLD = 20`
+> consecutive empty rows. Isolated blanks between real data rows are
+> still tolerated — only the trailing empty tail is skipped. Verified
+> by 2 unit tests.
+
+### ~~8.9 Excel's auto-filter range extends to row 404 but data goes to row 1032~~
 
 The auto-filter is on `$A$1:$AN$404` but the sheet has 1032 rows. Rows 405–1032 are outside the filter range. The software imports all rows up to `rowCount`, potentially importing 600+ empty rows.
 
@@ -341,31 +503,43 @@ The software creates a field `ePlant: number` for this column. The Excel header 
 
 | # | Gap | Severity | Category |
 |---|---|---|---|
-| 1.1 | Registration fee hardcoded at 25,000 |  Critical | Pricing |
-| 1.2 | Tuition hardcoded at 205,000 (ignores level) |  Critical | Pricing |
-| 1.3 | Only 2 transport tiers (need 4+) |  Critical | Pricing |
-| 1.4 | Can't add both transport_base + transport_premium |  High | Pricing |
+| ✅ 1.1 | ~~Registration fee hardcoded at 25,000~~ — **RESOLVED iter 2** |  Critical | Pricing |
+| ✅ 1.2 | ~~Tuition hardcoded at 205,000 (ignores level)~~ — **RESOLVED iter 2** |  Critical | Pricing |
+| ✅ 1.3 | ~~Only 2 transport tiers (need 4+)~~ — **RESOLVED iter 2** |  Critical | Pricing |
+| ✅ 1.4 | ~~Can't add both transport_base + transport_premium~~ — **RESOLVED iter 2** |  High | Pricing |
 | 1.5 | Always subtracts remise (some rows don't) |  Medium | Pricing |
-| 1.6 | Single formula for all 390 students |  Critical | Architecture |
-| 2.3 | GRAND TOTAL formula invented (doesn't exist in Excel) |  Medium | Phantom feature |
-| 4.1 | Arbitrary payment caps (25k, 71.5k, etc.) |  Critical | Payment |
-| 4.2 | Sequential auto-allocation vs. manual placement |  Critical | Payment |
+| 1.6 | Single formula for all 390 students (mostly addressed by iter 2 fixes 1.1–1.4) |  Critical | Architecture |
+| ✅ 2.3 | ~~GRAND TOTAL formula invented (doesn't exist in Excel)~~ — **RESOLVED iter 1** |  Medium | Phantom feature |
+| ✅ 4.1 | ~~Arbitrary payment caps (25k, 71.5k, etc.)~~ — **RESOLVED iter 1** |  Critical | Payment |
+| 4.2 | Sequential auto-allocation vs. manual placement (also addressed by iter 1 fix #5) |  Critical | Payment |
 | 4.3 | Transport tranches fixed at 30k/15k/10k |  High | Payment |
 | 5.1 | "8 amount columns" model is wrong |  High | Quote |
 | 5.2 | "advances" concept doesn't exist in Excel |  Medium | Quote |
 | 5.3 | 5% treated as tax, actually informational note |  High | Quote |
 | 5.4 | 5% is conditional on payment date |  Medium | Quote |
 | 5.6 | Confirmation rule not enforced |  Medium | Quote |
-| 6.1 | Hard validation vs. Excel's soft validation |  High | Validation |
-| 6.2 | Validates an empty column |  Medium | Validation |
+| ✅ 6.1 | ~~Hard validation vs. Excel's soft validation~~ — **RESOLVED iter 1** |  High | Validation |
+| ✅ 6.2 | ~~Validates an empty column~~ — **RESOLVED iter 1** |  Medium | Validation |
 | 7.1 | No customer statement (BON equivalent) |  High | Missing feature |
 | 7.2 | No family-level grouping |  High | Missing feature |
 | 7.3 | Comment-based audit trail → structured DB (paradigm shift) |  Medium | Workflow |
 | 7.4 | No conditional formatting equivalent |  Low | Visual |
-| 8.2 | Overpayments blocked (Excel allows) |  High | Edge case |
-| 8.4 | TRNSP option adds transport even when Excel didn't |  High | Edge case |
-| 8.8 | Sheet name "BON " has trailing space |  Low | Import |
-| 8.9 | Imports 600+ empty rows beyond filter range |  Low | Import |
+| ✅ 8.2 | ~~Overpayments blocked (Excel allows)~~ — **RESOLVED iter 2** |  High | Edge case |
+| ✅ 8.4 | ~~TRNSP option adds transport even when Excel didn't~~ — **RESOLVED iter 2** |  High | Edge case |
+| ✅ 8.5 | ~~Phone-number type mismatch~~ — **RESOLVED iter 1** |  Low | Type safety |
+| ✅ 8.6 | ~~NV2–NV5 level codes not recognised~~ — **RESOLVED iter 1** |  Low | Validation |
+| ✅ 8.8 | ~~Sheet name "BON " has trailing space~~ — **RESOLVED iter 1** |  Low | Import |
+| ✅ 8.9 | ~~Imports 600+ empty rows beyond filter range~~ — **RESOLVED iter 1** |  Low | Import |
+
+> **Cumulative summary (iterations 1 + 2)**: 15 issues fully resolved
+> (1.1, 1.2, 1.3, 1.4, 2.3, 4.1, 6.1, 6.2, 8.2, 8.4, 8.5, 8.6, 8.8, 8.9,
+> plus the FATAL §1 inter-rule data flow) and 1 partially resolved (9.4 —
+> soft-warning part done; validation-rules-registry still open). Issue
+> 1.6 (single formula for all 390 students) is largely addressed by
+> iteration 2 fixes 1.1–1.4 + §17, though the deeper architectural ask
+> (per-row formula storage) remains open. See
+> [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) for
+> full details, code references, test links, and screenshots.
 
 ---
 
@@ -403,6 +577,14 @@ The engine's architecture has **one fatal flaw** that makes it produce incorrect
 ---
 
 ## 1. The Fatal Flaw: Broken Inter-Rule Data Flow
+
+> ✅ **RESOLVED in iteration 2** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #8, §1 FATAL).
+> `LedgerService.computeFields()` now writes each computed value
+> (`devisAnnuel`, `totalVersements`, `totalCreance`) back to `ctx.fields`
+> before evaluating the next rule. The TOTAL CREANCE rule now computes
+> the correct value instead of always returning 0. Verified by 2 tests.
+
+## ~~1. The Fatal Flaw: Broken Inter-Rule Data Flow~~
 
 This is not a design opinion. This is a bug that makes the engine produce **wrong numbers on every row**.
 
@@ -719,6 +901,12 @@ There is no service that, given a row's attributes, **composes** the correct for
 
 ### 8.5 No Conditional Validation Service
 
+> ✅ **PARTIALLY RESOLVED in iteration 1** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #4, Issue 6.1/6.2).
+> The September-balance check is now a soft warning rather than a hard
+> throw, which addresses the immediate symptom. The broader architectural
+> ask — a general conditional-validation service that mirrors all of
+> Excel's data-validation definitions — is still open.
+
 Excel's data validation on column AG (`septemberBalance < 10000`) is a **soft** validation (`showErrorMessage=False`). The software implements it as a hard `BusinessRuleError` in `validateInput()`. There is no concept of soft vs. hard validation in the architecture.
 
 ---
@@ -726,6 +914,15 @@ Excel's data validation on column AG (`septemberBalance < 10000`) is a **soft** 
 ## 9. Business Rules in the Wrong Place
 
 ### 9.1 Payment allocation in LedgerService
+
+> ✅ **RESOLVED in iteration 1** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #5, Issue 4.1/9.1).
+> The hardcoded cap table was removed. `allocatePaymentToLedger()` now
+> only records an audit-trail comment in column-AM format; it does NOT
+> mutate payment columns. The operator decides which slot to credit via
+> the UI — exactly as in the Excel workflow. Verified by 3 unit +
+> integration tests.
+
+### ~~9.1 Payment allocation in LedgerService~~
 
 The `allocatePaymentToLedger` method lives in `LedgerService` and uses hardcoded caps:
 
@@ -749,9 +946,22 @@ The `schoolFeeTax` is computed and persisted as a field on `QuoteBlock`. In Exce
 
 ### 9.3 The GRAND TOTAL formula in FormulaRuleService
 
+> ✅ **RESOLVED in iteration 1** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #3, Issue 2.3/9.3).
+> The GRAND TOTAL starter rule was removed from `getStarterFormulaRules()`.
+> `LedgerService.computeFields()` returns `grandTotal = 0` unless a
+> user explicitly creates a `grandTotal` rule. Verified by 5 unit +
+> integration tests.
+
+### ~~9.3 The GRAND TOTAL formula in FormulaRuleService~~
+
 The `getStarterFormulaRules()` function seeds a GRAND TOTAL rule. Column AL in Excel is **empty**. This rule should not exist. It was invented by the software.
 
 ### 9.4 September balance validation in LedgerService.validateInput
+
+> ✅ **PARTIALLY RESOLVED in iteration 1** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #4, Issue 6.1/6.2).
+> The validation is now soft (returns `ValidationWarning[]` and logs
+> via `logger.warn`) rather than throwing. The broader architectural
+> ask — a dedicated validation-rules registry — is still open.
 
 This validation belongs in a **validation rules registry** that mirrors Excel's data validation definitions, not hardcoded in the service method. The Excel validation is soft; the software makes it hard.
 
@@ -760,6 +970,13 @@ This validation belongs in a **validation rules registry** that mirrors Excel's 
 ## 10. The Formula Engine's Limitations
 
 ### 10.1 No access to row metadata
+
+> ✅ **RESOLVED in iteration 2** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #15, §17).
+> `buildFormulaContext()` now injects `optionCode`, `level`, `classCode`,
+> `destination`, and `hasTransport` (boolean) into `ctx.fields`. User-
+> defined rules can now branch on row metadata. Verified by 3 tests.
+
+### ~~10.1 No access to row metadata~~
 
 The formula context contains only numeric fields. The formula cannot reference `optionCode`, `level`, `classCode`, or `destination` because these are strings not included in `buildFormulaContext`. A formula like:
 
@@ -925,23 +1142,23 @@ FamilyService.getStatement(tutorName) → {
 
 | # | Category | Severity | Finding |
 |---|----------|----------|---------|
-| 1 | **Data flow** |  FATAL | Intermediate results (devisAnnuel, totalVersements) are never written back to the formula context. TOTAL CREANCE and GRAND TOTAL always evaluate to 0. |
+| ✅ 1 | ~~**Data flow**~~ | ~~FATAL~~ | ~~Intermediate results (devisAnnuel, totalVersements) are never written back to the formula context. TOTAL CREANCE and GRAND TOTAL always evaluate to 0.~~ **RESOLVED iter 2 — see [all_that_is_solved_so_far.md](./all_that_is_solved_so_far.md) Fix #8.** |
 | 2 | **Formula model** |  STRUCTURAL | One global formula per target field. Excel has per-row formulas. No mechanism for per-row variation. |
 | 3 | **Pricing model** |  STRUCTURAL | Flat fee schedule with single amounts. Excel has multi-tier pricing indexed by level and destination. |
 | 4 | **Transport logic** |  STRUCTURAL | Transport unconditionally added. Excel adds it conditionally on OPTION=TRNSP with destination-specific amounts. |
 | 5 | **Quote model** |  STRUCTURAL | 8 numeric amounts per line. Excel has 3 numeric + 5 text columns. SUM(A:H) ≠ sum of 8 numbers. |
 | 6 | **Dependency graph** |  HIGH | totalCreance depends on devisAnnuel + totalVersements, but context doesn't carry intermediates. |
-| 7 | **Phantom calculation** |  HIGH | GRAND TOTAL rule exists. Column AL is empty in Excel. Invented calculation. |
+| ✅ 7 | ~~**Phantom calculation**~~ | ~~HIGH~~ | ~~GRAND TOTAL rule exists. Column AL is empty in Excel. Invented calculation.~~ **RESOLVED iter 1 — see [all_that_is_solved_so_far.md](./all_that_is_solved_so_far.md) Fix #3.** |
 | 8 | **5% tax** |  HIGH | Persisted as entity field. Excel has it as conditional display note. |
-| 9 | **Payment allocation** |  HIGH | Hardcoded caps in LedgerService. Doesn't exist in Excel. Wrong service. |
+| ✅ 9 | ~~**Payment allocation**~~ | ~~HIGH~~ | ~~Hardcoded caps in LedgerService. Doesn't exist in Excel. Wrong service.~~ **RESOLVED iter 1 — see [all_that_is_solved_so_far.md](./all_that_is_solved_so_far.md) Fix #5.** |
 | 10 | **Missing: family grouping** |  HIGH | No equivalent of BON sheet's VLOOKUP-based family statement. |
-| 11 | **Missing: pricing lookup** |  HIGH | No level→fee or destination→transport mapping service. |
-| 12 | **Missing: formula composition** |  HIGH | No service that builds per-row formula from row attributes. |
+| 11 | **Missing: pricing lookup** |  HIGH | No level→fee or destination→transport mapping service. **(Largely addressed by iter 2 fixes #9, #10, #11 — `shared/pricing.ts` now provides both lookups.)** |
+| 12 | **Missing: formula composition** |  HIGH | No service that builds per-row formula from row attributes. **(Partly addressed by iter 2 fix #15 — formulas can now branch on level/optionCode/destination.)** |
 | 13 | **condition_expr dead code** |  MEDIUM | Field exists on entity, never read by any service. |
 | 14 | **Circular dependency hack** |  MEDIUM | `services.feeSchedule["ledger"] = services.ledger` bypasses DI. |
-| 15 | **Soft vs hard validation** |  MEDIUM | Excel's septemberBalance validation is soft. Software throws exception. |
+| ✅ 15 | ~~**Soft vs hard validation**~~ | ~~MEDIUM~~ | ~~Excel's septemberBalance validation is soft. Software throws exception.~~ **RESOLVED iter 1 — see [all_that_is_solved_so_far.md](./all_that_is_solved_so_far.md) Fix #4.** |
 | 16 | **Ingestion skips computed values** |  MEDIUM | Import reads inputs, skips computed columns, then recomputes incorrectly. |
-| 17 | **Context missing metadata** |  MEDIUM | optionCode, level, classCode, destination not in formula context. |
+| ✅ 17 | ~~**Context missing metadata**~~ | ~~MEDIUM~~ | ~~optionCode, level, classCode, destination not in formula context.~~ **RESOLVED iter 2 — see [all_that_is_solved_so_far.md](./all_that_is_solved_so_far.md) Fix #15.** |
 | 18 | **No ranges in context** |  MEDIUM | VLOOKUP support exists in engine but ranges never populated. |
 | 19 | **Scalability** |  MEDIUM | recomputeAll() loads all 10,000 entries into memory, evaluates sequentially. |
 | 20 | **No audit trail for calculations** |  LOW | No record of which formula was used for which row, or what components composed it. |

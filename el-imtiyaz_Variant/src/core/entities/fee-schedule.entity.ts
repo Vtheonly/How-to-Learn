@@ -27,8 +27,10 @@ import { Identifier } from "../value-objects/identifier";
 export type FeeScheduleLineType =
   | "registration"     // column R / FI
   | "tuition"          // the 205 000 line in column L formulas
-  | "transport_base"   // the 35 000 line
-  | "transport_premium"// the 55 000 line
+  | "transport_base"   // the 35 000 line (Tier 1 — nearby)
+  | "transport_intermediate" // the 43 000 line (Tier 2 — intermediate) — issue 1.3
+  | "transport_medium" // the 52 000 line (Tier 3 — medium distance) — issue 1.3
+  | "transport_premium"// the 55 000 line (Tier 4 — far)
   | "transport_t1"     // column W
   | "transport_t2"     // column X
   | "transport_t3"     // column Y
@@ -80,12 +82,20 @@ export type UpdateFeeScheduleInput = Partial<CreateFeeScheduleInput>;
 /**
  * The default schedule that reproduces the Excel file's implicit pricing.
  * Used by LedgerService.computeDevisAnnuel when no other schedule is linked.
+ *
+ * Issue 1.3 (iteration 2): the original schedule had only 2 transport
+ * tiers (35k and 55k). We now include all 4 documented tiers
+ * (35k / 43k / 52k / 55k) so that the destination-based lookup in
+ * `shared/pricing.ts` can find the correct amount for every town.
  */
 export const DEFAULT_FEE_SCHEDULE: Array<Omit<FeeScheduleLine, "id">> = [
   { type: "registration",     label: "Registration Fee",        amount: 25000,  includedInQuote: true,  isInstallment: true,  excelColumn: "R" },
   { type: "tuition",          label: "Base Tuition",            amount: 205000, includedInQuote: true,  isInstallment: false, excelColumn: "L" },
-  { type: "transport_base",   label: "Transport (standard)",    amount: 35000,  includedInQuote: true,  isInstallment: false, excelColumn: "L" },
-  { type: "transport_premium",label: "Transport (premium)",     amount: 55000,  includedInQuote: true,  isInstallment: false, excelColumn: "L" },
+  // Transport tiers — issue 1.3: all 4 documented tiers are now present.
+  { type: "transport_base",        label: "Transport (Tier 1 — nearby)",        amount: 35000, includedInQuote: true,  isInstallment: false, excelColumn: "L" },
+  { type: "transport_intermediate",label: "Transport (Tier 2 — intermediate)",  amount: 43000, includedInQuote: true,  isInstallment: false, excelColumn: "L" },
+  { type: "transport_medium",      label: "Transport (Tier 3 — medium)",        amount: 52000, includedInQuote: true,  isInstallment: false, excelColumn: "L" },
+  { type: "transport_premium",     label: "Transport (Tier 4 — far)",           amount: 55000, includedInQuote: true,  isInstallment: false, excelColumn: "L" },
   { type: "transport_t1",     label: "Transport T1",            amount: 30000,  includedInQuote: false, isInstallment: true,  excelColumn: "W" },
   { type: "transport_t2",     label: "Transport T2",            amount: 15000,  includedInQuote: false, isInstallment: true,  excelColumn: "X" },
   { type: "transport_t3",     label: "Transport T3",            amount: 10000,  includedInQuote: false, isInstallment: true,  excelColumn: "Y" },

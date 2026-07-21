@@ -77,11 +77,27 @@ export class PaymentService {
         0,
       );
 
+    // ── Issue 8.2 (iteration 2): overpayments are now ALLOWED ──────────
+    //
+    // The previous version of this method threw a BusinessRuleError when
+    // `amount > totalOutstanding && totalOutstanding > 0`. The source
+    // Excel workbook allows overpayments silently — e.g. the row for
+    // SIDI MAMER SAMYI shows TOTAL*CREANCE = -30,000 (the family paid
+    // 30,000 more than the devis). The OVERPAID status enum value
+    // already existed but was unreachable in normal flow because this
+    // throw blocked the save.
+    //
+    // We now log an advisory warning instead of throwing. The downstream
+    // allocation loop (below) already handles the overflow correctly:
+    // any `remaining > 0` after all invoices are fully paid is recorded
+    // by setting the payment status to OVERPAID.
     if (amount.amount > totalOutstanding && totalOutstanding > 0) {
-      throw new BusinessRuleError(
-        `Payment amount (${amount.format()}) exceeds outstanding balance (${Money.from(totalOutstanding).format()})`,
-        { amount: amount.amount, outstanding: totalOutstanding },
-      );
+      logger.warn("payment.overpayment", {
+        studentId: input.studentId,
+        amount: amount.amount,
+        outstanding: totalOutstanding,
+        overpayment: amount.amount - totalOutstanding,
+      });
     }
 
     const payment = await this.payments.create({ ...input, invoiceIds });

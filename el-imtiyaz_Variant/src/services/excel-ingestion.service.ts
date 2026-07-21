@@ -35,6 +35,7 @@ import type {
 } from "../core/entities/spreadsheet-template.entity";
 import type { CreateLedgerEntryInput } from "../core/entities/ledger-entry.entity";
 import { LEDGER_COLUMN_MAP } from "../core/entities/ledger-entry.entity";
+import { isValidLevelCode } from "../shared/level-codes";
 
 export interface AnalyzeResult {
   template: SpreadsheetTemplate;
@@ -237,6 +238,16 @@ export class ExcelIngestionService {
    * Each row from row 2 downward becomes one LedgerEntry.
    * Computed columns (L, P, Q) are evaluated by the LedgerService
    * after import — we only persist the raw inputs.
+   *
+   * Implementation notes (issues 8.8 & 8.9 from software_review.md):
+   *   - The source workbook's sheet names sometimes contain trailing
+   *     whitespace (e.g. "BON "). `findWorksheetByName` below performs
+   *     a trim-aware, case-insensitive lookup so callers can pass
+   *     "BON" and still resolve the actual sheet.
+   *   - Excel's auto-filter range often stops well before `rowCount`
+   *     (e.g. filter on $A$1:$AN$404 but rowCount=1032). To avoid
+   *     iterating hundreds of trailing empty rows, we stop iterating
+   *     after `EMPTY_ROW_ABORT_THRESHOLD` consecutive empty rows.
    */
   async importLedger(
     filePath: string,
@@ -249,9 +260,12 @@ export class ExcelIngestionService {
 
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.readFile(filePath);
-    const ws = workbook.getWorksheet(sheetName);
+    const ws = findWorksheetByName(workbook, sheetName);
     if (!ws) {
-      throw new NotFoundError("Worksheet", sheetName);
+      throw new NotFoundError(
+        "Worksheet",
+        `${sheetName} (also tried trim/case-insensitive match against ${workbook.worksheets.map(s => `"${s.name}"`).join(", ")})`,
+      );
     }
 
     let imported = 0;
@@ -262,6 +276,10 @@ export class ExcelIngestionService {
     const headerRow = ws.getRow(1);
     const colMap = buildColumnToFieldMap(headerRow);
 
+    // Abort after this many consecutive empty rows — see issue 8.9.
+    const EMPTY_ROW_ABORT_THRESHOLD = 20;
+    let consecutiveEmpty = 0;
+
     for (let r = 2; r <= ws.rowCount; r++) {
       const row = ws.getRow(r);
       try {
@@ -269,19 +287,35 @@ export class ExcelIngestionService {
         // Skip empty rows.
         if (!input.studentName?.trim()) {
           skipped++;
+          consecutiveEmpty++;
+          if (consecutiveEmpty >= EMPTY_ROW_ABORT_THRESHOLD) {
+            // We've crossed into the trailing empty region beyond the
+            // auto-filter range. Stop scanning to avoid importing 600+
+            // empty rows (issue 8.9).
+            logger.info("excel.ingestion.ledger.abortEmptyTail", {
+              filePath,
+              sheetName: ws.name,
+              atRow: r,
+              consecutiveEmpty,
+            });
+            break;
+          }
           continue;
         }
+        consecutiveEmpty = 0;
         await this.ledger.create(input);
         imported++;
       } catch (err) {
         errors.push({ row: r, error: (err as Error).message });
         skipped++;
+        // Reset the empty counter — a row that errored is not empty.
+        consecutiveEmpty = 0;
       }
     }
 
     logger.info("excel.ingestion.ledger.imported", {
       filePath,
-      sheetName,
+      sheetName: ws.name,
       imported,
       skipped,
       errors: errors.length,
@@ -309,9 +343,13 @@ export class ExcelIngestionService {
 
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.readFile(filePath);
-    const ws = workbook.getWorksheet(sheetName);
+    // Use trim-aware, case-insensitive lookup — see issue 8.8.
+    const ws = findWorksheetByName(workbook, sheetName);
     if (!ws) {
-      throw new NotFoundError("Worksheet", sheetName);
+      throw new NotFoundError(
+        "Worksheet",
+        `${sheetName} (also tried trim/case-insensitive match)`,
+      );
     }
 
     let imported = 0;
@@ -367,6 +405,36 @@ export class ExcelIngestionService {
 
 // ── Helpers ────────────────────────────────────────────────────
 
+/**
+ * Find a worksheet by name, tolerating trailing/leading whitespace and
+ * case differences.
+ *
+ * Background (issue 8.8 in software_review.md): the source workbook's
+ * `BON` sheet is actually named `"BON "` (with a trailing space). Any
+ * code that calls `workbook.getWorksheet("BON")` would fail to resolve
+ * it. This helper normalises both the requested name and the candidate
+ * names so callers can pass the logical name ("BON") and still resolve
+ * the real sheet ("BON ").
+ */
+export function findWorksheetByName(
+  workbook: ExcelJS.Workbook,
+  name: string,
+): ExcelJS.Worksheet | undefined {
+  const target = String(name ?? "").trim().toLowerCase();
+  if (!target) return undefined;
+  // First try an exact match — preserves backward compatibility and is
+  // the common case for normalised workbooks.
+  const exact = workbook.getWorksheet(name);
+  if (exact) return exact;
+  // Fall back to a trim-aware, case-insensitive match.
+  for (const ws of workbook.worksheets) {
+    if (String(ws.name ?? "").trim().toLowerCase() === target) {
+      return ws;
+    }
+  }
+  return undefined;
+}
+
 /** Build a { excelColumnLetter → fieldName } map from the header row. */
 function buildColumnToFieldMap(headerRow: ExcelJS.Row): Map<string, string> {
   const map = new Map<string, string>();
@@ -417,7 +485,12 @@ function readRowAsLedgerInput(
         input.studentName = String(value ?? "").trim();
         break;
       case "phoneNumbers":
-        input.phoneNumbers = String(value ?? "");
+        // Excel stores phone numbers as a single slash-separated string
+        // (e.g. "0663701834/0660800317"). The LedgerEntry entity mirrors
+        // the raw string — see issue 8.5 in software_review.md. Callers
+        // that need a structured array (e.g. the Student entity) should
+        // use `parsePhoneNumbers()` from `shared/phone-numbers.ts`.
+        input.phoneNumbers = String(value ?? "").trim();
         break;
       case "infos":
         input.infos = value ? String(value) : undefined;
@@ -428,9 +501,24 @@ function readRowAsLedgerInput(
       case "tutorName":
         input.tutorName = value ? String(value) : undefined;
         break;
-      case "level":
-        input.level = value ? String(value) : undefined;
+      case "level": {
+        // Issue 8.6: NV2/NV3/NV4/NV5 are valid level codes in the source
+        // workbook. We import the raw string unchanged, but log an
+        // advisory warning for codes outside the canonical catalogue so
+        // operators can spot typos. We do NOT throw — the spreadsheet
+        // contains occasional ad-hoc values and we don't want to break
+        // imports. See `shared/level-codes.ts` for the canonical list.
+        const rawLevel = value ? String(value).trim() : undefined;
+        input.level = rawLevel;
+        if (rawLevel && !isValidLevelCode(rawLevel)) {
+          logger.warn("excel.ingestion.unknownLevelCode", {
+            sourceRow,
+            level: rawLevel,
+            hint: "Not in canonical LEVEL_CODES list. Imported as-is.",
+          });
+        }
         break;
+      }
       case "classCode":
         input.classCode = value ? String(value) : undefined;
         break;

@@ -173,17 +173,43 @@ export class FormulaRuleService {
  * Get a list of "starter" formula rules that reproduce the Excel
  * workbook's built-in formulas. Used to seed the formula library
  * on first run.
+ *
+ * Iteration 2 changes (issues 1.1, 1.2, 1.3, 1.4, 8.4, §17):
+ *   - The DEVIS ANNUEL starter rule now uses `resolvedTransport` — a
+ *     single field that exposes the destination-appropriate transport
+ *     amount (one of 35k / 43k / 52k / 55k) or 0 when the student has
+ *     no transport. This replaces the old `transportBase` reference,
+ *     which always returned 35k regardless of the student's town.
+ *   - The starter rule also takes advantage of the level-indexed
+ *     `registration` and `baseTuition` fields, which are now resolved
+ *     from the student's `level` (column G) when no custom FeeSchedule
+ *     line is configured.
+ *   - The TOTAL CREANCE rule continues to reference `devisAnnuel` and
+ *     `totalVersements` — the §1 FATAL-flaw fix in LedgerService now
+ *     writes those intermediate values back to the context, so the
+ *     rule actually computes the correct balance.
  */
 export function getStarterFormulaRules(): Array<Omit<CreateFormulaRuleInput, "id">> {
   return [
     {
       name: "DEVIS ANNUEL",
-      description: "Reproduces Excel column L: registration + tuition + transport − discount",
-      expression: "registration + baseTuition + transportBase - remise",
+      description:
+        "Reproduces Excel column L: registration + tuition + transport − discount. " +
+        "Iteration 2: registration and tuition are level-indexed (issues 1.1, 1.2); " +
+        "transport is destination-indexed across 4 tiers (issues 1.3, 1.4, 8.4).",
+      expression: "registration + baseTuition + resolvedTransport - remise",
       scope: "ledger",
       targetField: "devisAnnuel",
       trigger: "on_save",
-      watchedFields: ["remise", "registration", "baseTuition", "transportBase"],
+      watchedFields: [
+        "remise",
+        "registration",
+        "baseTuition",
+        "resolvedTransport",
+        "level",
+        "optionCode",
+        "destination",
+      ],
       isActive: true,
       priority: 10,
     },
@@ -209,17 +235,13 @@ export function getStarterFormulaRules(): Array<Omit<CreateFormulaRuleInput, "id
       isActive: true,
       priority: 30,
     },
-    {
-      name: "GRAND TOTAL",
-      description: "Reproduces Excel column AL: sum of all payment + extras + quarterly",
-      expression: "totalVersements + psy1 + psy2 + orth1 + orth2 + ePlant + ratrapage + september + december + march",
-      scope: "ledger",
-      targetField: "grandTotal",
-      trigger: "on_save",
-      watchedFields: ["totalVersements", "psy1", "psy2", "orth1", "orth2", "ePlant", "ratrapage", "september", "december", "march"],
-      isActive: true,
-      priority: 40,
-    },
+    // NOTE: There is intentionally NO "GRAND TOTAL" starter rule.
+    // Excel column AL (TOTAL) is entirely empty in the source workbook —
+    // there is no real formula to reproduce. The previous version of this
+    // file seeded a `grandTotal` rule (sum of totalVersements + extras +
+    // quarterly), but that was an invented calculation that does not exist
+    // in the spreadsheet and produced misleading values. See issues 2.3
+    // and 9.3 in software_review.md.
     {
       name: "Quote Sub-Total",
       description: "Reproduces Excel Devis I27: =SUM(I15:I26)",
