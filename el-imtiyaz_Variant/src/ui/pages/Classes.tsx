@@ -1,12 +1,9 @@
-/**
- * Classes — manage school classes & sections.
- */
-
 import { useEffect, useState } from 'react';
 import { Plus, Edit, Trash2, GraduationCap } from 'lucide-react';
 import { Card, Button, Badge, EmptyState, Modal } from '../components/common';
 import { PageHeader } from '../components/common/PageHeader';
 import { DataGrid, Column } from '../components/data/DataGrid';
+import toast from 'react-hot-toast';
 
 interface ClassRow {
   id: string;
@@ -22,13 +19,17 @@ export function Classes() {
   const [classes, setClasses] = useState<ClassRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [activeAcademicYearId, setActiveAcademicYearId] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
     try {
-      const rows = await window.elImtiyaz.classes.list();
+      const [rows, years] = await Promise.all([
+        window.elImtiyaz.classes.list(),
+        window.elImtiyaz.academicYears.list()
+      ]);
       setClasses((rows as any[]).map((c) => ({
-        id: c.id.value,
+        id: c.id.value || c.id,
         grade: c.grade,
         section: c.section,
         name: c.name,
@@ -36,6 +37,10 @@ export function Classes() {
         capacity: c.capacity,
         enrolledCount: c.enrolledCount
       })));
+      const activeY = (years as any[]).find(y => y.isActive);
+      if (activeY) setActiveAcademicYearId(activeY.id.value || activeY.id);
+    } catch {
+      toast.error("Failed to load school classes.");
     } finally {
       setLoading(false);
     }
@@ -100,25 +105,41 @@ export function Classes() {
         />
       </Card>
 
-      <NewClassModal open={showModal} onClose={() => setShowModal(false)} onSaved={load} />
+      <NewClassModal
+        open={showModal}
+        onClose={() => setShowModal(false)}
+        onSaved={load}
+        activeYearId={activeAcademicYearId}
+      />
     </div>
   );
 }
 
-function NewClassModal({ open, onClose, onSaved }: { open: boolean; onClose: () => void; onSaved: () => void }) {
+function NewClassModal({ open, onClose, onSaved, activeYearId }: { open: boolean; onClose: () => void; onSaved: () => void, activeYearId: string | null }) {
   const [grade, setGrade] = useState('');
   const [section, setSection] = useState('');
   const [capacity, setCapacity] = useState('30');
+  const [saving, setSaving] = useState(false);
 
   const submit = async () => {
-    await window.elImtiyaz.classes.create({
-      grade,
-      section,
-      capacity: parseInt(capacity, 10)
-    });
-    onSaved();
-    onClose();
-    setGrade(''); setSection(''); setCapacity('30');
+    if (!grade || !section) return;
+    setSaving(true);
+    try {
+      await window.elImtiyaz.classes.create({
+        grade,
+        section,
+        capacity: parseInt(capacity, 10),
+        academicYearId: activeYearId || undefined
+      });
+      toast.success("Successfully registered new class!");
+      onSaved();
+      onClose();
+      setGrade(''); setSection(''); setCapacity('30');
+    } catch (err) {
+      toast.error(`Error saving class: ${(err as Error).message}`);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -128,8 +149,10 @@ function NewClassModal({ open, onClose, onSaved }: { open: boolean; onClose: () 
       title="New Class"
       footer={
         <>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" onClick={submit} disabled={!grade || !section}>Create</Button>
+          <Button variant="ghost" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button variant="primary" onClick={submit} disabled={!grade || !section || saving}>
+            {saving ? 'Creating...' : 'Create'}
+          </Button>
         </>
       }
     >

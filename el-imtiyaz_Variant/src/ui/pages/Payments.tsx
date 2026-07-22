@@ -1,21 +1,24 @@
-import React, { useEffect, useState, useRef, useMemo } from "react";
-import {
-  Search,
-  Download,
-  RefreshCw,
-  BookOpen,
-  FileSpreadsheet,
-  Plus,
-} from "lucide-react";
-import { Card, Button, StatBlock, EmptyState } from "../components/common";
+import React, { useEffect, useState, useMemo } from "react";
+import { Search, RefreshCw } from "lucide-react";
+import { Card, Button, StatBlock } from "../components/common";
 import { PageHeader } from "../components/common/PageHeader";
 import { DataGrid, Column } from "../components/data/DataGrid";
-import { LedgerFormSlider } from "../components/forms/LedgerFormSlider";
+import {
+  LedgerFormSlider,
+  INITIAL_LEDGER_FORM,
+  LedgerFormValues,
+} from "../components/forms/LedgerFormSlider";
 import { formatDZD } from "@shared/currency";
+import {
+  resolveRegistration,
+  resolveTuition,
+  resolveTransportAmount,
+} from "@shared/pricing";
 import toast from "react-hot-toast";
 
 interface LedgerRow {
   id: string;
+  studentId: string;
   studentName: string;
   level: string;
   classCode: string;
@@ -48,42 +51,23 @@ interface LedgerRow {
   createdAt: string;
 }
 
+const num = (s: string) => parseFloat(s) || 0;
+const sumV = (v: LedgerFormValues) =>
+  num(v.fi) +
+  num(v.v2) +
+  num(v.altV2) +
+  num(v.v3) +
+  num(v.t1) +
+  num(v.t2) +
+  num(v.t3);
+
 export function Payments() {
-  const [viewMode, setViewMode] = useState<"payments" | "ledger">("ledger");
   const [ledger, setLedger] = useState<LedgerRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [recomputing, setRecomputing] = useState(false);
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
-
-  // Sliding Data State
-  const [formValues, setFormValues] = useState({
-    studentName: "",
-    level: "PRIM",
-    classCode: "",
-    optionCode: "",
-    remise: "0",
-    justification: "",
-    fi: "25000",
-    v2: "0",
-    altV2: "0",
-    v3: "0",
-    destination: "",
-    t1: "0",
-    t2: "0",
-    t3: "0",
-    psy1: "0",
-    psy2: "0",
-    orth1: "0",
-    orth2: "0",
-    ePlant: "0",
-    ratrapage: "0",
-    september: "0",
-    december: "0",
-    march: "0",
-    septemberBalance: "0",
-    infos: "",
-    date: new Date().toISOString().slice(0, 10),
+  const [formValues, setFormValues] = useState<LedgerFormValues>({
+    ...INITIAL_LEDGER_FORM,
   });
 
   const loadLedger = async () => {
@@ -93,6 +77,7 @@ export function Payments() {
       setLedger(
         (rows as any[]).map((e) => ({
           id: e.id.value || e.id,
+          studentId: e.studentId ?? "",
           studentName: e.studentName,
           level: e.level,
           classCode: e.classCode,
@@ -131,145 +116,158 @@ export function Payments() {
       setLoading(false);
     }
   };
-
   useEffect(() => {
     loadLedger();
   }, []);
 
-  const handleFormChange = (key: string, value: string) => {
-    setFormValues((prev) => ({ ...prev, [key]: value }));
-  };
+  const set = (key: string, value: string) =>
+    setFormValues((p) => ({ ...p, [key]: value }));
 
-  const handleClearForm = () => {
+  const clear = () => {
     setEditingEntryId(null);
     setFormValues({
-      studentName: "",
-      level: "PRIM",
-      classCode: "",
-      optionCode: "",
-      remise: "0",
-      justification: "",
-      fi: "25000",
-      v2: "0",
-      altV2: "0",
-      v3: "0",
-      destination: "",
-      t1: "0",
-      t2: "0",
-      t3: "0",
-      psy1: "0",
-      psy2: "0",
-      orth1: "0",
-      orth2: "0",
-      ePlant: "0",
-      ratrapage: "0",
-      september: "0",
-      december: "0",
-      march: "0",
-      septemberBalance: "0",
-      infos: "",
+      ...INITIAL_LEDGER_FORM,
       date: new Date().toISOString().slice(0, 10),
     });
   };
 
-  const handleSave = async () => {
+  const edit = (r: LedgerRow) => {
+    setEditingEntryId(r.id);
+    setFormValues({
+      studentId: r.studentId ?? "",
+      studentName: r.studentName,
+      level: r.level || "PRIM",
+      classCode: r.classCode,
+      optionCode: r.optionCode,
+      tutorName: (r as any).tutorName ?? "",
+      phoneNumbers: (r as any).phoneNumbers ?? "",
+      remise: String(r.remise),
+      justification: r.justification,
+      fi: String(r.fi),
+      v2: String(r.v2),
+      altV2: String(r.altV2),
+      v3: String(r.v3),
+      destination: r.destination,
+      t1: String(r.t1),
+      t2: String(r.t2),
+      t3: String(r.t3),
+      psy1: String(r.psy1),
+      psy2: String(r.psy2),
+      orth1: String(r.orth1),
+      orth2: String(r.orth2),
+      ePlant: String(r.ePlant),
+      ratrapage: String(r.ratrapage),
+      september: String(r.september),
+      december: String(r.december),
+      march: String(r.march),
+      septemberBalance: String(r.septemberBalance),
+      infos: r.infos,
+      date: r.createdAt?.slice(0, 10) || new Date().toISOString().slice(0, 10),
+    });
+  };
+
+  const save = async () => {
     if (!formValues.studentName.trim()) {
       toast.error("Pupil name cannot be empty.");
       return;
     }
+    if (!formValues.studentId) {
+      toast.error("Pick a registered pupil from the NOM dropdown first.");
+      return;
+    }
+    const newV = sumV(formValues);
+    const prevV = editingEntryId
+      ? (ledger.find((r) => r.id === editingEntryId)?.totalVersements ?? 0)
+      : 0;
     const payload = {
-      ...formValues,
-      remise: parseFloat(formValues.remise) || 0,
-      fi: parseFloat(formValues.fi) || 0,
-      v2: parseFloat(formValues.v2) || 0,
-      altV2: parseFloat(formValues.altV2) || 0,
-      v3: parseFloat(formValues.v3) || 0,
-      t1: parseFloat(formValues.t1) || 0,
-      t2: parseFloat(formValues.t2) || 0,
-      t3: parseFloat(formValues.t3) || 0,
-      psy1: parseFloat(formValues.psy1) || 0,
-      psy2: parseFloat(formValues.psy2) || 0,
-      orth1: parseFloat(formValues.orth1) || 0,
-      orth2: parseFloat(formValues.orth2) || 0,
-      ePlant: parseFloat(formValues.ePlant) || 0,
-      ratrapage: parseFloat(formValues.ratrapage) || 0,
-      september: parseFloat(formValues.september) || 0,
-      december: parseFloat(formValues.december) || 0,
-      march: parseFloat(formValues.march) || 0,
-      septemberBalance: parseFloat(formValues.septemberBalance) || 0,
+      studentId: formValues.studentId || undefined,
+      studentName: formValues.studentName,
+      level: formValues.level,
+      classCode: formValues.classCode,
+      optionCode: formValues.optionCode,
+      tutorName: formValues.tutorName,
+      phoneNumbers: formValues.phoneNumbers,
+      remise: num(formValues.remise),
+      justification: formValues.justification,
+      fi: num(formValues.fi),
+      v2: num(formValues.v2),
+      altV2: num(formValues.altV2),
+      v3: num(formValues.v3),
+      destination: formValues.destination,
+      t1: num(formValues.t1),
+      t2: num(formValues.t2),
+      t3: num(formValues.t3),
+      psy1: num(formValues.psy1),
+      psy2: num(formValues.psy2),
+      orth1: num(formValues.orth1),
+      orth2: num(formValues.orth2),
+      ePlant: num(formValues.ePlant),
+      ratrapage: num(formValues.ratrapage),
+      september: num(formValues.september),
+      december: num(formValues.december),
+      march: num(formValues.march),
+      septemberBalance: num(formValues.septemberBalance),
+      infos: formValues.infos,
     };
-
     try {
-      if (editingEntryId) {
+      if (editingEntryId)
         await window.elImtiyaz.ledger.update(editingEntryId, payload);
-        toast.success("Successfully updated entry.");
+      else await window.elImtiyaz.ledger.create(payload as any);
+      const delta = newV - prevV;
+      if (delta > 0 && payload.studentId) {
+        try {
+          await window.elImtiyaz.payments.create({
+            studentId: payload.studentId,
+            amount: delta,
+            paymentMethod: "cash",
+            paymentDate:
+              formValues.date || new Date().toISOString().slice(0, 10),
+            notes: `Ledger payment — ${payload.studentName}`,
+          });
+          toast.success("Row saved — receipt generated.");
+        } catch (e) {
+          toast.error("Saved, but receipt failed: " + (e as Error).message);
+        }
       } else {
-        await window.elImtiyaz.ledger.create(payload as any);
-        toast.success("Added student to the master ledger.");
+        toast.success(
+          editingEntryId
+            ? "Successfully updated entry."
+            : "Added pupil to the master ledger.",
+        );
       }
-      handleClearForm();
+      clear();
       loadLedger();
     } catch (err) {
       toast.error(`Error saving: ${(err as Error).message}`);
     }
   };
 
-  const handleEditRow = (row: LedgerRow) => {
-    setEditingEntryId(row.id);
-    setFormValues({
-      studentName: row.studentName,
-      level: row.level,
-      classCode: row.classCode,
-      optionCode: row.optionCode,
-      remise: String(row.remise),
-      justification: row.justification,
-      fi: String(row.fi),
-      v2: String(row.v2),
-      altV2: String(row.altV2),
-      v3: String(row.v3),
-      destination: row.destination,
-      t1: String(row.t1),
-      t2: String(row.t2),
-      t3: String(row.t3),
-      psy1: String(row.psy1),
-      psy2: String(row.psy2),
-      orth1: String(row.orth1),
-      orth2: String(row.orth2),
-      ePlant: String(row.ePlant),
-      ratrapage: String(row.ratrapage),
-      september: String(row.september),
-      december: String(row.december),
-      march: String(row.march),
-      septemberBalance: String(row.septemberBalance),
-      infos: row.infos,
-      date: row.createdAt?.slice(0, 10) || "",
-    });
-  };
-
   const liveTotals = useMemo(() => {
-    const remise = parseFloat(formValues.remise) || 0;
-    const fi = parseFloat(formValues.fi) || 0;
-    const v2 = parseFloat(formValues.v2) || 0;
-    const altV2 = parseFloat(formValues.altV2) || 0;
-    const v3 = parseFloat(formValues.v3) || 0;
-    const t1 = parseFloat(formValues.t1) || 0;
-    const t2 = parseFloat(formValues.t2) || 0;
-    const t3 = parseFloat(formValues.t3) || 0;
-
-    const baseTuition = 205000;
-    const transportBase = formValues.optionCode === "TRNSP" ? 35000 : 0;
-    const devisAnnuel = fi + baseTuition + transportBase - remise;
-    const totalVersements = fi + v2 + altV2 + v3 + t1 + t2 + t3;
-
+    const remise = num(formValues.remise);
+    const registration = resolveRegistration(formValues.level);
+    const tuition = resolveTuition(formValues.level);
+    const transport =
+      formValues.optionCode === "TRNSP" && formValues.destination?.trim()
+        ? resolveTransportAmount(formValues.destination)
+        : 0;
+    const devisAnnuel = registration + tuition + transport - remise;
+    const totalVersements = sumV(formValues);
+    const grandTotal =
+      totalVersements +
+      num(formValues.psy1) +
+      num(formValues.psy2) +
+      num(formValues.orth1) +
+      num(formValues.orth2) +
+      num(formValues.ePlant) +
+      num(formValues.ratrapage) +
+      num(formValues.september) +
+      num(formValues.december) +
+      num(formValues.march);
     return {
       devisAnnuel,
       totalVersements,
       totalCreance: devisAnnuel - totalVersements,
-      grandTotal:
-        totalVersements +
-        (parseFloat(formValues.psy1) || 0) +
-        (parseFloat(formValues.psy2) || 0) +
-        (parseFloat(formValues.orth1) || 0),
+      grandTotal,
     };
   }, [formValues]);
 
@@ -300,7 +298,7 @@ export function Payments() {
       width: 120,
       render: (r) => (
         <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
-          <Button size="sm" variant="ghost" onClick={() => handleEditRow(r)}>
+          <Button size="sm" variant="ghost" onClick={() => edit(r)}>
             Edit
           </Button>
           <Button
@@ -335,7 +333,6 @@ export function Payments() {
           </Button>
         }
       />
-
       <div
         className="grid"
         style={{
@@ -346,9 +343,9 @@ export function Payments() {
       >
         <LedgerFormSlider
           liveTotals={liveTotals}
-          onValueChange={handleFormChange}
-          onClear={handleClearForm}
-          onSave={handleSave}
+          onValueChange={set}
+          onClear={clear}
+          onSave={save}
           values={formValues}
         />
         <Card title="Recalculated System Summaries">
@@ -363,13 +360,12 @@ export function Payments() {
             />
             <StatBlock
               label="Outstanding Balance"
-              value={ledger.reduce((acc, row) => acc + row.totalCreance, 0)}
+              value={ledger.reduce((a, r) => a + r.totalCreance, 0)}
               format="currency"
             />
           </div>
         </Card>
       </div>
-
       <Card>
         <div
           className="el-search-bar"

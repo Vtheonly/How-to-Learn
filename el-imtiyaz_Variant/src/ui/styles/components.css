@@ -1017,9 +1017,16 @@
   background: var(--color-slate-gray);
 }
 
-.el-grid__th--right { text-align: right; }
-.el-grid__th--center { text-align: center; }
-.el-grid__th--check { text-align: center; width: 40px; }
+.el-grid__th--right {
+  text-align: right;
+}
+.el-grid__th--center {
+  text-align: center;
+}
+.el-grid__th--check {
+  text-align: center;
+  width: 40px;
+}
 
 .el-grid__th-content {
   display: inline-flex;
@@ -1048,9 +1055,16 @@
   padding: var(--space-2) var(--space-3);
 }
 
-.el-grid__td--right { text-align: right; }
-.el-grid__td--center { text-align: center; }
-.el-grid__td--check { text-align: center; width: 40px; }
+.el-grid__td--right {
+  text-align: right;
+}
+.el-grid__td--center {
+  text-align: center;
+}
+.el-grid__td--check {
+  text-align: center;
+  width: 40px;
+}
 
 .el-grid__row {
   transition: background var(--duration-fast) var(--ease-out);
@@ -1183,9 +1197,18 @@
   color: var(--color-primary-blue, #2563eb);
 }
 
-.el-datagrid__cell--align-left   { text-align: left;   justify-content: flex-start; }
-.el-datagrid__cell--align-right  { text-align: right;  justify-content: flex-end;   }
-.el-datagrid__cell--align-center { text-align: center; justify-content: center;     }
+.el-datagrid__cell--align-left {
+  text-align: left;
+  justify-content: flex-start;
+}
+.el-datagrid__cell--align-right {
+  text-align: right;
+  justify-content: flex-end;
+}
+.el-datagrid__cell--align-center {
+  text-align: center;
+  justify-content: center;
+}
 
 .el-datagrid__cell--checkbox {
   display: flex;
@@ -1200,13 +1223,17 @@
   cursor: pointer;
 }
 
+
+
+
+/* AFTER */
 .el-datagrid__loading {
   position: absolute;
   inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.75);
+  background: rgba(20, 21, 22, 0.55);     /* ← dark veil, spinner stays visible */
   backdrop-filter: blur(1px);
   z-index: 2;
 }
@@ -1224,10 +1251,18 @@
  * The class is applied to a row or cell; the background colour is
  * the equivalent of Excel's conditional-formatting fill.
  */
-.el-row-status--ok       { background-color: #B7E1CD !important; }
-.el-row-status--info     { background-color: #F0E68C !important; }
-.el-row-status--warning  { background-color: #FFD580 !important; }
-.el-row-status--critical { background-color: #FFB3B3 !important; }
+.el-row-status--ok {
+  background-color: #b7e1cd !important;
+}
+.el-row-status--info {
+  background-color: #f0e68c !important;
+}
+.el-row-status--warning {
+  background-color: #ffd580 !important;
+}
+.el-row-status--critical {
+  background-color: #ffb3b3 !important;
+}
 
 .el-row-status-badge {
   display: inline-flex;
@@ -1238,7 +1273,32 @@
   font-weight: 600;
   color: var(--color-text-primary, #111827);
 }
-.el-row-status-badge.el-row-status--ok       { background-color: #B7E1CD; }
-.el-row-status-badge.el-row-status--info     { background-color: #F0E68C; }
-.el-row-status-badge.el-row-status--warning  { background-color: #FFD580; }
-.el-row-status-badge.el-row-status--critical { background-color: #FFB3B3; }
+.el-row-status-badge.el-row-status--ok {
+  background-color: #b7e1cd;
+}
+.el-row-status-badge.el-row-status--info {
+  background-color: #f0e68c;
+}
+.el-row-status-badge.el-row-status--warning {
+  background-color: #ffd580;
+}
+.el-row-status-badge.el-row-status--critical {
+  background-color: #ffb3b3;
+}
+
+/* Explicit high-contrast dropdown option styles */
+.el-select select option {
+  background-color: #1e1f20 !important; /* Panel background */
+  color: #eff2f3 !important; /* Branded off-white text */
+}
+
+/* Enforce legibility for disabled inputs & text fields on different OS runtimes */
+.el-input input {
+  color: #eff2f3 !important;
+  background-color: transparent !important;
+}
+
+.el-select select {
+  color: #eff2f3 !important;
+  background-color: var(--bg-input) !important;
+}

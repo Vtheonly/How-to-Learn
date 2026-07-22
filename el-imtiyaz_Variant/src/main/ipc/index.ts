@@ -31,6 +31,7 @@ import { SpreadsheetTemplateRepository } from "../../infrastructure/repositories
 
 // Services
 import { StudentService } from "../../services/student.service";
+import { ParentService } from "../../services/parent.service";
 import { PaymentService } from "../../services/payment.service";
 import { DebtService } from "../../services/debt.service";
 import { ReceiptService } from "../../services/receipt.service";
@@ -41,7 +42,6 @@ import { AcademicYearService } from "../../services/academic-year.service";
 import { FeeTemplateService } from "../../services/fee-template.service";
 import { DiscountService } from "../../services/discount.service";
 import { EmployeeService } from "../../services/employee.service";
-import { ParentService } from "../../services/parent.service";
 import { ClassService } from "../../services/class.service";
 import { WorkflowService } from "../../services/workflow.service";
 import { NotificationService } from "../../services/notification.service";
@@ -57,6 +57,9 @@ import {
 } from "../../services/formula-rule.service";
 import { ExcelIngestionService } from "../../services/excel-ingestion.service";
 import { safeEvaluate } from "../../services/formula/formula-engine";
+
+// Pipelines
+import { PaymentPipeline } from "../../pipelines/payment-pipeline";
 
 interface RegistryDependencies {
   database: DatabaseClient;
@@ -134,15 +137,7 @@ export function registerIpcHandlers(deps: RegistryDependencies): void {
     repos.auditComments,
     eventBus,
   );
-  // ── Iteration 3 (issues 12 + 14): removed the late-injection hack ──
-  //
-  // The previous line was:
-  //     services.feeSchedule["ledger"] = services.ledger;
-  // which bypassed TypeScript's type system (the FeeScheduleService
-  // declared `ledger: LedgerService | null`) and created a hidden
-  // circular dependency. We now wire the eventBus into
-  // FeeScheduleService (above) and let LedgerService subscribe to the
-  // `feeSchedule.changed` event. No late injection required.
+
   services.excelIngestion = new ExcelIngestionService(
     repos.spreadsheetTemplates,
     repos.ledger,
@@ -220,6 +215,9 @@ export function registerIpcHandlers(deps: RegistryDependencies): void {
 
   services.workflow = new WorkflowService(repos.workflows, nodeServices);
 
+  // Initialize live workflows to automatically run when Events fire
+  services.workflow.registerTriggerListeners(eventBus);
+
   services.audit.registerListeners(eventBus);
   services.notification.registerListeners(eventBus);
 
@@ -244,6 +242,11 @@ export function registerIpcHandlers(deps: RegistryDependencies): void {
       }
     });
   };
+
+  const paymentPipeline = new PaymentPipeline(
+    services.payment,
+    services.receipt,
+  );
 
   wrap(IPC.STUDENTS_LIST, (_e, query) => services.student.list(query ?? {}));
   wrap(IPC.STUDENTS_GET, (_e, id) => services.student.getById(id));
@@ -272,8 +275,10 @@ export function registerIpcHandlers(deps: RegistryDependencies): void {
 
   wrap(IPC.PAYMENTS_LIST, (_e, query) => services.payment.list(query ?? {}));
   wrap(IPC.PAYMENTS_GET, (_e, id) => services.payment.getById(id));
+
+  // Pipeline execution for automated receipt PDF generation
   wrap(IPC.PAYMENTS_CREATE, (_e, input) =>
-    services.payment.recordPayment(input),
+    paymentPipeline.run(input).then((ctx) => ctx.payment),
   );
   wrap(IPC.PAYMENTS_UPDATE, (_e, id, patch) =>
     services.payment.update(id, patch),
