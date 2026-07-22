@@ -15,14 +15,14 @@
     "build:main": "tsc -p tsconfig.main.json",
     "build:preload": "tsc -p tsconfig.preload.json",
     "build:renderer": "vite build",
-    "start": "npm run build && electron . --no-sandbox",
-    "start:dev": "concurrently -k -n ELECTRON,VITE -c yellow,cyan \"wait-on tcp:5173 && cross-env NODE_ENV=development electron . --no-sandbox\" \"vite\"",
+    "start": "npm run rebuild:sqlite && npm run build && electron . --no-sandbox",
+    "start:dev": "npm run rebuild:sqlite && concurrently -k -n ELECTRON,VITE -c yellow,cyan \"wait-on tcp:5173 && cross-env NODE_ENV=development electron . --no-sandbox\" \"vite\"",
     "lint": "eslint . --ext .ts,.tsx",
     "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.preload.json --noEmit && tsc -p tsconfig.json --noEmit",
-    "package": "npm run build && electron-builder",
-    "package:win": "npm run build && electron-builder --win",
-    "package:mac": "npm run build && electron-builder --mac",
-    "package:linux": "npm run build && electron-builder --linux",
+    "package": "npm run rebuild:sqlite && npm run build && electron-builder",
+    "package:win": "npm run rebuild:sqlite && npm run build && electron-builder --win",
+    "package:mac": "npm run rebuild:sqlite && npm run build && electron-builder --mac",
+    "package:linux": "npm run rebuild:sqlite && npm run build && electron-builder --linux",
     "clean": "rimraf dist dist-preload dist-main node_modules/.cache",
     "rebuild:sqlite": "node scripts/rebuild-better-sqlite3.js",
     "postinstall": "node scripts/rebuild-better-sqlite3.js"
@@ -52,6 +52,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@electron/rebuild": "^3.6.1",
     "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^20.16.5",
     "@types/papaparse": "^5.3.14",
