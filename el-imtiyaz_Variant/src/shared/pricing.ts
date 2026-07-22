@@ -266,6 +266,26 @@ export function resolveTransportAmount(
 }
 
 /**
+ * Check whether a town name is in the canonical transport-pricing
+ * table (i.e. `resolveTransportTier()` would NOT fall back to
+ * NEARBY for it).
+ *
+ * Exposed publicly so the TransportPricingService (issue 8.2) and
+ * the UI can warn the operator when they type an unknown
+ * destination.
+ *
+ * ── Iteration 6 / Fix #44 ──────────────────────────────────────────
+ */
+export function isTransportDestinationRecognised(
+  town: string | null | undefined,
+): boolean {
+  if (!town) return false;
+  const key = normaliseTownName(town);
+  if (!key) return false;
+  return key in TOWN_TO_TIER;
+}
+
+/**
  * Backwards-compatible transport tier names that map to the
  * `FeeScheduleLineType` strings. The fee schedule still uses
  * `transport_base` and `transport_premium`; we add `transport_intermediate`

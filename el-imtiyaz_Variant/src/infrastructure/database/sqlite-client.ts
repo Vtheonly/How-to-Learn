@@ -54,8 +54,23 @@ export class DatabaseClient {
 
       logger.info("database.opened", { file: this.options.filePath });
     } catch (err) {
+      // ── Iteration 6 / Fix #51: actionable error for NODE_MODULE_VERSION mismatch ──
+      //
+      // The `better-sqlite3` native binary is compiled against a
+      // specific Node.js / Electron ABI. When the binary was built
+      // under one Node version but is loaded under another, the
+      // error message is buried inside Electron's boot log and not
+      // obviously actionable. We detect the signature here and
+      // append the standard fix (`npm rebuild better-sqlite3`).
+      const msg = (err as Error).message || String(err);
+      const isModuleVersionMismatch =
+        msg.includes("NODE_MODULE_VERSION") ||
+        msg.includes("was compiled against a different Node.js version");
+      const hint = isModuleVersionMismatch
+        ? " — Hint: run `npm rebuild better-sqlite3` (or `node scripts/rebuild-better-sqlite3.js`) to recompile the native binary against the current Node.js / Electron ABI. See Fix #51 in all_that_is_solved_so_far.md."
+        : "";
       throw new InfrastructureError(
-        `Failed to open database: ${(err as Error).message}`,
+        `Failed to open database: ${msg}${hint}`,
       );
     }
   }

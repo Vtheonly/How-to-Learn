@@ -35,6 +35,7 @@ import {
 import { evaluateRuleCondition } from "../shared/rule-condition";
 import { scanForDeadTermTrackingValues } from "../shared/term-tracking";
 import { validateEPlantAmount } from "../shared/e-plant";
+import { buildFormulaLookupRanges } from "../shared/formula-lookup-ranges";
 
 /**
  * A soft validation warning. Excel's data-validation rules on column AG
@@ -885,12 +886,32 @@ export class LedgerService {
       ? resolveTransportAmount(input.destination)
       : 0;
 
-    return { fields };
+    // ── Iteration 6 / Fix #43 (issue 10.2 / item 18): populate ctx.ranges ──
+    //
+    // The formula engine supports `VLOOKUP`, `INDEX`, and `MATCH`
+    // against named ranges in `ctx.ranges`. Before this fix, the
+    // ranges dictionary was never populated — so any rule that used
+    // `VLOOKUP(level, LEVEL_PRICING, 4, 0)` returned `#N/A` because
+    // the engine found no range named `LEVEL_PRICING`.
+    //
+    // We now inject the three canonical lookup ranges built from the
+    // same pricing tables that drive the fallback formula:
+    //   - LEVEL_PRICING     (level → registration + tuition + subtotal)
+    //   - TRANSPORT_PRICES  (tier  → amount + T1 + T2 + T3)
+    //   - LEVEL_CODES       (level → label)
+    //
+    // The ranges are pure data (no DB lookup) so they're cheap to
+    // rebuild on every compute. If a future rule needs a range that
+    // reflects operator-edited FeeSchedule amounts, that range can
+    // be added here alongside the canonical ones.
+    const ranges = buildFormulaLookupRanges();
+
+    return { fields, ranges };
   }
 
   private evalNumeric(
     rule: any,
-    ctx: { fields: Record<string, unknown> },
+    ctx: { fields: Record<string, unknown>; ranges?: Record<string, Array<Record<string, unknown>>> },
   ): number {
     const result = safeEvaluate(
       rule.expression,

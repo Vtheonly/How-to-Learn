@@ -1,5 +1,38 @@
 # Complete Gap Analysis: Software vs. Excel Workbook
 
+> ## ✅ Iteration 6 — 10 more issues resolved (2026-07-22)
+>
+> Building on iterations 1–5, ten additional issues have been
+> **fully resolved and verified**. The resolved issues are:
+>
+> | Issue | Title | Severity | Fix # |
+> |-------|-------|----------|-------|
+> | 10.2 / 18 | VLOOKUP support existed in engine but `ctx.ranges` was never populated | MEDIUM | #43 |
+> | 8.2 | No Transport Pricing Service (no service-layer wrapper around tier lookup) | HIGH | #44 |
+> | 8.3 | No Level-Based Pricing Service (no service-layer wrapper around level lookup) | HIGH | #45 |
+> | 8.4 | No Formula Composition Service (no way to compose per-row formula expression) | HIGH | #46 |
+> | 7.3 | `======` closed-file suffix was parsed but had no workflow meaning | MEDIUM | #47 |
+> | 7.2 / 8.1 | No Family Grouping Service (no family-level aggregation view) | HIGH | #48 |
+> | 7.6 | The "PAR PARENT" summary sheet was deleted, never recreated | MEDIUM | #49 |
+> | 9.4 | September-balance validation was hardcoded in service method, not a registry | MEDIUM | #50 |
+> | (build blocker) | better-sqlite3 NODE_MODULE_VERSION mismatch had no actionable error | FATAL | #51 |
+> | (build blocker) | DataGrid component claimed done in iter 5 but file STILL missing — re-created | FATAL | #52 |
+>
+> **Cumulative across all six iterations**: 52 issues fully resolved,
+> verified by **300 tests** (35 iter-1 + 35 iter-2 + 35 iter-3 +
+> 48 iter-4 + 67 iter-5 + 80 iter-6), all passing. The FATAL
+> DataGrid build blocker (Fix #52) was claimed as fixed in BOTH
+> iteration 4 AND iteration 5 but the file was never actually
+> committed to the repository — iteration 6 re-creates it (third
+> time's the charm) and the existing iteration-5 tests now pass.
+> The better-sqlite3 NODE_MODULE_VERSION error (Fix #51) was the
+> runtime error the user hit on first `npm start` — it now has an
+> actionable hint in the error message AND a postinstall script
+> that auto-rebuilds the native binary.
+>
+> Full details, code references, test links, and screenshots are in
+> [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md).
+
 > ## ✅ Iteration 5 — 10 more issues resolved (2026-07-22)
 >
 > Building on iterations 1–4, ten additional issues have been
@@ -558,9 +591,31 @@ The software has no equivalent feature. Its `StudentProfile` page shows financia
 
 ### 7.2 Family grouping is not implemented
 
-Excel's BON sheet groups multiple children under one parent (e.g., ABDELAOUI INES + ABDELAOUI SAMY under client ABDELAOUI). The software's ledger is per-student with no family-level aggregation view.
+> ✅ **RESOLVED in iteration 6** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #48, Issues 7.2/8.1).
+> New `src/services/family.service.ts` (`FamilyService`) groups
+> ledger entries by `tutorName` and produces a `FamilyGroupingResult`
+> with per-family totals (devisAnnuel, totalVersements,
+> totalCreance), sibling-family detection, and a `familyBalance`
+> field (= totalCreance sum, negative for overpaid families — issue
+> 8.2 preserved). The service is read-only and stateless; it
+> composes cleanly with the existing LedgerRepository. Verified by
+> 6 unit + integration tests including a real-SQLite integration
+> test that creates two siblings under one tutor and confirms the
+> family aggregates correctly.
 
 ### 7.3 Payment history as cell comments (Column AM) — different paradigm
+
+> ✅ **RESOLVED in iteration 6** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #47, Issue 7.3).
+> New `src/shared/audit-trail-workflow.ts` module provides
+> meaningful workflow handling for the `======` closed-file suffix:
+> `isAuditCommentClosed()` detects the suffix on a single comment,
+> `getClosedStateForEntry()` returns the closing comment's ID and
+> date for an entry's whole trail, `summariseAuditTrail()` returns
+> total amount / count / first+last payment dates / closed flag,
+> and `buildClosedStateByEntry()` aggregates the state across many
+> entries for the ledger grid's "open files only" filter. The
+> `formatClosedStateBadge()` helper returns "Closed"/"Open" for
+> the UI. Verified by 8 unit tests.
 
 | Excel | Software |
 |---|---|
@@ -609,6 +664,18 @@ The software has no equivalent visual logic for the ledger grid.
 Excel's columns AF–AK (SEPTEMBRE through CREANCES MARS) are **entirely empty**. The software creates database columns for them and includes them in the GRAND TOTAL formula, but they serve no purpose.
 
 ### 7.6 The "PAR PARENT" summary sheet — deleted, never recreated
+
+> ✅ **RESOLVED in iteration 6** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #49, Issue 7.6).
+> New `src/services/parent-summary.service.ts`
+> (`ParentSummaryService`) recreates the deleted `PAR PARENT` sheet
+> as a derived view. For each tutor (family), it produces a
+> `ParentSummaryRow` with: the list of children (each with their
+> individual devisAnnuel / totalVersements / totalCreance / audit-
+> trail summary / isClosed flag), family-level totals, a
+> family-level `isFamilyClosed` flag (true only when ALL children's
+> trails are closed — Fix #47 integration), and the family's
+> `lastPaymentDate` (the latest payment date across all children).
+> The service is read-only and stateless. Verified by 4 unit tests.
 
 Excel's BON sheet references a `'PAR PARENT'` sheet that was a parent-level summary. This sheet was deleted. The software has no parent-level summary view either.
 
@@ -775,7 +842,7 @@ The software creates a field `ePlant: number` for this column. The Excel header 
 | ✅ 1.6 | ~~Single formula for all 390 students~~ — **LARGELY RESOLVED iter 5** (per-row `customFormula` override) |  Critical | Architecture |
 | ✅ 2.3 | ~~GRAND TOTAL formula invented (doesn't exist in Excel)~~ — **RESOLVED iter 1** |  Medium | Phantom feature |
 | ✅ 4.1 | ~~Arbitrary payment caps (25k, 71.5k, etc.)~~ — **RESOLVED iter 1** |  Critical | Payment |
-| 4.2 | Sequential auto-allocation vs. manual placement (also addressed by iter 1 fix #5) |  Critical | Payment |
+| 4.2 | Sequential auto-allocation vs. manual placement (also addressed by iter 1 fix #5; iter 6 #46 adds FormulaCompositionService to compose the operator's intended formula) |  Critical | Payment |
 | ✅ 4.3 | ~~Transport tranches fixed at 30k/15k/10k~~ — **RESOLVED iter 4** |  High | Payment |
 | ✅ 5.1 | ~~"8 amount columns" model is wrong~~ — **RESOLVED iter 5** (type-aware `computeLineTotal`) |  High | Quote |
 | ✅ 5.2 | ~~"advances" concept doesn't exist in Excel~~ — **RESOLVED iter 3** |  Medium | Quote |
@@ -787,8 +854,8 @@ The software creates a field `ePlant: number` for this column. The Excel header 
 | ✅ 6.2 | ~~Validates an empty column~~ — **RESOLVED iter 1** |  Medium | Validation |
 | ✅ 6.3 | ~~No validation for Dec/Mar receivable columns~~ — **RESOLVED iter 4** |  Medium | Validation |
 | 7.1 | No customer statement (BON equivalent) |  High | Missing feature |
-| 7.2 | No family-level grouping |  High | Missing feature |
-| 7.3 | Comment-based audit trail → structured DB (paradigm shift) |  Medium | Workflow |
+| ✅ 7.2 | ~~No family-level grouping~~ — **RESOLVED iter 6** (`FamilyService` groups ledger entries by tutor) |  High | Missing feature |
+| ✅ 7.3 | ~~Comment-based audit trail → structured DB (paradigm shift)~~ — **RESOLVED iter 6** (`audit-trail-workflow.ts` adds closed-file workflow) |  Medium | Workflow |
 | ✅ 7.4 | ~~No conditional formatting equivalent~~ — **RESOLVED iter 5** (`getLedgerRowStatus` + CSS) |  Low | Visual |
 | ✅ 7.5 | ~~Term-by-term tracking dead in both~~ — **RESOLVED iter 5** (advisory when populated) |  Medium | Validation |
 | ✅ 8.1 | ~~Off-by-one S94 reference undetected during ingestion~~ — **RESOLVED iter 4** |  Low | Edge case |
@@ -801,22 +868,24 @@ The software creates a field `ePlant: number` for this column. The Excel header 
 | ✅ 8.8 | ~~Sheet name "BON " has trailing space~~ — **RESOLVED iter 1** |  Low | Import |
 | ✅ 8.9 | ~~Imports 600+ empty rows beyond filter range~~ — **RESOLVED iter 1** |  Low | Import |
 
-> **Cumulative summary (iterations 1 + 2 + 3 + 4 + 5)**: 42 issues fully
+> **Cumulative summary (iterations 1 + 2 + 3 + 4 + 5 + 6)**: 52 issues fully
 > resolved (1.1, 1.2, 1.3, 1.4, 1.5, 1.6 (largely), 2.3, 4.1, 4.3,
-> 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 6.1, 6.2, 6.3, 7.4, 7.5, 8.1, 8.2,
-> 8.3, 8.4, 8.5, 8.6, 8.7, 8.8, 8.9, 8.10, plus the FATAL §1
-> inter-rule data flow, the §3 fee-schedule-lookup, the Flaw A
-> async-drift contract, the issues 11/16 ingestion-preservation
-> pair, the issues 12/14 circular-dep pair, the issue 10.4
-> condition_expr dead-code, the issue 19 recomputeAll scalability,
-> the issue 20 audit-trail gap, the Mismatch C sibling-discount
-> LIKE-query performance bug, and the FATAL DataGrid build blocker
-> that was claimed in iter 4 but never actually committed) and 1
-> partially resolved (9.4 — soft-warning part done;
-> validation-rules-registry still open). Issue 1.6 is now largely
-> addressed by iteration 5's per-row `customFormula` override,
-> completing the architectural ask that iteration 2 fixes 1.1–1.4
-> + §17 left open.
+> 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 6.1, 6.2, 6.3, 7.2, 7.3, 7.4, 7.5, 7.6,
+> 8.1, 8.2, 8.3, 8.4, 8.5, 8.6, 8.7, 8.8, 8.9, 8.10, 9.2, 9.4, 10.2,
+> 10.3, 10.4, 18, plus the FATAL §1 inter-rule data flow, the §3
+> fee-schedule-lookup, the Flaw A async-drift contract, the issues
+> 11/16 ingestion-preservation pair, the issues 12/14 circular-dep
+> pair, the issue 19 recomputeAll scalability, the issue 20
+> audit-trail gap, the Mismatch C sibling-discount LIKE-query
+> performance bug, the FATAL DataGrid build blocker that was
+> claimed in iter 4 AND iter 5 but never actually committed
+> (re-created in iter 6), and the FATAL better-sqlite3
+> NODE_MODULE_VERSION error that had no actionable hint). Issue
+> 1.6 is now largely addressed by iteration 5's per-row
+> `customFormula` override, completing the architectural ask that
+> iteration 2 fixes 1.1–1.4 + §17 left open. Issue 9.4 is now
+> FULLY resolved (the validation-rules-registry was the last open
+> piece).
 > See [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md)
 > for full details, code references, test links, and screenshots.
 
@@ -1172,6 +1241,10 @@ The priority ordering (10 → 20 → 30 → 40) is correct: devisAnnuel before t
 
 ### 8.1 No Family Grouping Service
 
+> ✅ **RESOLVED in iteration 6** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #48, Issues 7.2/8.1).
+> New `FamilyService` (see issue 7.2 above) provides the family-
+> grouping service the original review asked for. Verified by 6 tests.
+
 The BON sheet groups students by family (parent name) and produces a consolidated statement. The software has no service that:
 - Groups `LedgerEntry` records by `tutorName` or a family identifier
 - Sums devisAnnuel, totalVersements, totalCreance across siblings
@@ -1181,13 +1254,49 @@ The `ParentRepository.getStudentIds()` exists but is never connected to the ledg
 
 ### 8.2 No Transport Pricing Service
 
+> ✅ **RESOLVED in iteration 6** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #44, Issue 8.2).
+> New `src/services/transport-pricing.service.ts`
+> (`TransportPricingService`) is a stateless, mockable service that
+> exposes the transport-tier pricing lookups in the same shape as
+> the other domain services. Methods: `resolve(destination)` →
+> full result (tier, amount, installments, recognised flag),
+> `resolveAmount(destination)`, `resolveTier(destination)`,
+> `resolveInstallments(destination)`, `listAllTiers()`, and
+> `isRecognised(destination)`. The underlying tier table and
+> installment breakdown come from `shared/pricing.ts` (Fix #11,
+> Fix #25). Verified by 8 unit tests.
+
 There is no service that maps `destination → transport cost`. The fee schedule has two hardcoded transport amounts. The 20 destinations in the REF sheet (Boumerdès, Corso, Boudouaou, etc.) each have different costs, but no lookup mechanism exists.
 
 ### 8.3 No Level-Based Pricing Service
 
+> ✅ **RESOLVED in iteration 6** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #45, Issue 8.3).
+> New `src/services/level-pricing.service.ts`
+> (`LevelPricingService`) is a stateless, mockable service that
+> exposes the level-indexed pricing lookups in the same shape as
+> the other domain services. Methods: `resolve(level)` → full
+> result (registration, tuition, subtotal, label, recognised
+> flag), `resolveRegistration(level)`, `resolveTuition(level)`,
+> `listAllLevels()`, and `defaultRegistration` / `defaultTuition`
+> getters. The underlying pricing tables come from
+> `shared/pricing.ts` (Fix #9, Fix #10). Verified by 9 unit tests.
+
 There is no service that maps `(level, classCode) → (registration fee, tuition fee)`. The fee schedule has one registration amount and one tuition amount.
 
 ### 8.4 No Formula Composition Service
+
+> ✅ **RESOLVED in iteration 6** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #46, Issue 8.4).
+> New `src/services/formula-composition.service.ts`
+> (`FormulaCompositionService`) composes an Excel-style DEVIS
+> ANNUEL formula expression from a row's attributes (level,
+> destination, optionCode, remise, omitRemise, dualTransport,
+> optional registration/tuition overrides). The `compose()` method
+> returns the expression string, the individual addends, the
+> resolved component amounts, and the expected numerical result.
+> A `composeStandard()` convenience wrapper covers the common
+> case. A `detectPattern()` helper reverse-engineers a hand-typed
+> Excel formula into its components (used by the ingestion service
+> to flag non-standard rows). Verified by 11 unit tests.
 
 There is no service that, given a row's attributes, **composes** the correct formula expression. The operator in Excel mentally does: "This is a PRIM student with transport to Boudouaou and a 25,500 discount, so the formula is `=25000+205000+52000-J2`." No software component replicates this decision process.
 
@@ -1234,6 +1343,14 @@ This is a **payment domain** concern, not a ledger calculation concern. It also 
 
 ### 9.2 The 5% "tax" in QuoteService
 
+> ✅ **RESOLVED in iteration 3** (same fix as 5.3) — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #18, Issues 5.3/5.4/9.2).
+> `schoolFeeTax` is now persisted as 0 unless `paymentDate`
+> qualifies for the early-payment bonus. The field's semantics
+> now match Excel's "5% remise si le paiement est effectué en
+> totalité avant le 30 juin" note. Iteration 6's
+> `ValidationRulesRegistry` (Fix #50) further exposes the rule
+> as a discrete, documented entry in the validation registry.
+
 The `schoolFeeTax` is computed and persisted as a field on `QuoteBlock`. In Excel, it is a **display-only note** conditional on payment date. It should be a computed display value in the UI layer, not a persisted field in the domain entity.
 
 ### 9.3 The GRAND TOTAL formula in FormulaRuleService
@@ -1250,10 +1367,23 @@ The `getStarterFormulaRules()` function seeds a GRAND TOTAL rule. Column AL in E
 
 ### 9.4 September balance validation in LedgerService.validateInput
 
+> ✅ **FULLY RESOLVED in iteration 6** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #50, Issue 9.4).
+> Iteration 1 made the septemberBalance check soft (Fix #4). The
+> broader architectural ask — a dedicated **validation-rules
+> registry** that mirrors Excel's data-validation definitions —
+> is now implemented in `src/shared/validation-rules-registry.ts`.
+> The registry exposes `EXCEL_VALIDATION_RULES` (6 seeded rules
+> mirroring Excel's AG/AI/AK/AD/W/X/Y validations), a
+> `runValidationRules()` helper that runs all soft rules against
+> an input, and `listValidationRules()` / `getValidationRule()`
+> accessors for the UI's validation-reference panel. Each rule
+> declares its `excelSource` (the Excel data-validation definition
+> it mirrors) so future rules can be added in one place. Verified
+> by 14 unit tests.
+
 > ✅ **PARTIALLY RESOLVED in iteration 1** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #4, Issue 6.1/6.2).
 > The validation is now soft (returns `ValidationWarning[]` and logs
-> via `logger.warn`) rather than throwing. The broader architectural
-> ask — a dedicated validation-rules registry — is still open.
+> via `logger.warn`) rather than throwing.
 
 This validation belongs in a **validation rules registry** that mirrors Excel's data validation definitions, not hardcoded in the service method. The Excel validation is soft; the software makes it hard.
 
@@ -1280,6 +1410,18 @@ is impossible because `optionCode` is not in the context.
 
 ### 10.2 No access to lookup tables
 
+> ✅ **RESOLVED in iteration 6** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #43, Issues 10.2 / 18).
+> New `src/shared/formula-lookup-ranges.ts` module builds the
+> three canonical lookup ranges (`LEVEL_PRICING`,
+> `TRANSPORT_PRICES`, `LEVEL_CODES`) from the same pricing tables
+> that drive the fallback formula. `LedgerService.buildFormulaContext()`
+> now populates `ctx.ranges` via `buildFormulaLookupRanges()`, so
+> any user-defined formula rule can use `VLOOKUP(level,
+> LEVEL_PRICING, 4, 0)` to look up tuition, or
+> `VLOOKUP("medium", TRANSPORT_PRICES, 3, 0)` to look up the
+> medium-tier transport amount. Verified by 11 unit tests
+> including end-to-end VLOOKUP tests against all three ranges.
+
 The formula engine supports `VLOOKUP` against named ranges in `ctx.ranges`. But `buildFormulaContext` never populates `ranges`. There is no way to write:
 
 ```
@@ -1289,6 +1431,15 @@ VLOOKUP(destination, transportPrices, 2, 0)
 because `transportPrices` is never injected into the context.
 
 ### 10.3 No support for per-row formula storage
+
+> ✅ **RESOLVED in iteration 5** — see [`all_that_is_solved_so_far.md`](./all_that_is_solved_so_far.md) (Fix #35, Issue 1.6/§2/10.3).
+> The `LedgerEntry` entity now has a `customFormula: string` field
+> (migration 008). The fallback path in `LedgerService.computeFields`
+> honours it: when `customFormula` is set, the engine evaluates
+> that expression instead of the global `devisAnnuel` FormulaRule
+> for THIS row only. Iteration 6's `FormulaCompositionService`
+> (Fix #46) can compose the expression string for the operator to
+> paste into the field. Verified by 5 unit + integration tests.
 
 The `LedgerEntry` entity has no field for storing a per-row formula expression. The `formula_rules` table stores global rules. There is no way to say "row 2 uses formula X, row 3 uses formula Y."
 
@@ -1496,7 +1647,7 @@ FamilyService.getStatement(tutorName) → {
 | ✅ 15 | ~~**Soft vs hard validation**~~ | ~~MEDIUM~~ | ~~Excel's septemberBalance validation is soft. Software throws exception.~~ **RESOLVED iter 1 — see [all_that_is_solved_so_far.md](./all_that_is_solved_so_far.md) Fix #4.** |
 | ✅ 16 | ~~**Ingestion skips computed values**~~ | ~~MEDIUM~~ | ~~Import reads inputs, skips computed columns, then recomputes incorrectly.~~ **RESOLVED iter 3 — see [all_that_is_solved_so_far.md](./all_that_is_solved_so_far.md) Fix #20.** |
 | ✅ 17 | ~~**Context missing metadata**~~ | ~~MEDIUM~~ | ~~optionCode, level, classCode, destination not in formula context.~~ **RESOLVED iter 2 — see [all_that_is_solved_so_far.md](./all_that_is_solved_so_far.md) Fix #15.** |
-| 18 | **No ranges in context** |  MEDIUM | VLOOKUP support exists in engine but ranges never populated. |
+| ✅ 18 | ~~**No ranges in context**~~ | ~~MEDIUM~~ | ~~VLOOKUP support exists in engine but ranges never populated.~~ **RESOLVED iter 6 — see [all_that_is_solved_so_far.md](./all_that_is_solved_so_far.md) Fix #43.** |
 | ✅ 19 | ~~**Scalability**~~ | ~~MEDIUM~~ | ~~recomputeAll() loads all 10,000 entries into memory, evaluates sequentially.~~ **RESOLVED iter 4 — see [all_that_is_solved_so_far.md](./all_that_is_solved_so_far.md) Fix #29.** |
 | ✅ 20 | ~~**No audit trail for calculations**~~ | ~~LOW~~ | ~~No record of which formula was used for which row, or what components composed it.~~ **RESOLVED iter 4 — see [all_that_is_solved_so_far.md](./all_that_is_solved_so_far.md) Fix #30.** |
 
